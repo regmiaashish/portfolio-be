@@ -2,7 +2,6 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    gemini_api_key: str = Field(..., env="GEMINI_API_KEY")
     smtp_host: str = Field(..., env="SMTP_HOST")
     smtp_port: int = Field(..., env="SMTP_PORT")
     smtp_user: str = Field(..., env="SMTP_USER")
@@ -14,6 +13,11 @@ class Settings(BaseSettings):
     portfolio_url: str = Field(..., env="PORTFOLIO_URL")
     github_url: str = Field(..., env="GITHUB_URL")
     linkedin_url: str = Field(..., env="LINKEDIN_URL")
+    cookie_domain: str = Field(..., env="COOKIE_DOMAIN")
+    cookie_samesite: str = Field(..., env="COOKIE_SAMESITE")
+    cookie_secure: bool = Field(..., env="COOKIE_SECURE")
+    gemini_api_key: str = Field(..., env="GEMINI_API_KEY")
+
 
 
     @field_validator("allowed_origins", mode="before")

@@ -11,8 +11,8 @@ from src.schemas.common_schema import APIResponse
 
 
 
-limiter = Limiter(key_func=get_remote_address)  # Use remote address for rate limiting
-router = APIRouter(tags=["Message"], prefix="/v1")
+limiter = Limiter(key_func=get_remote_address) 
+router = APIRouter(tags=["Message"], prefix="/api/v1")
 
 @router.post("/contact", response_model=APIResponse, status_code=status.HTTP_200_OK)
 @limiter.limit("5/minute")
