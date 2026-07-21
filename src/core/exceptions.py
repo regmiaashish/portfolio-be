@@ -35,3 +35,54 @@ class EmailSendException(AppException):
             status_code=500,
             errors=errors,
         )
+
+
+class UserNotFoundException(AppException):
+    """
+    Raised when a user is not found in the database.
+    """
+
+    def __init__(
+        self,
+        message: str = "User not found.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=404,
+            errors=errors,
+        )
+
+
+class RepositoryError(AppException):
+    """
+    Raised when there is an error in the repository layer.
+    """
+
+    def __init__(
+        self,
+        message: str = "An error occurred in the repository.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=500,
+            errors=errors,
+        )
+
+
+class BusinessRuleViolationError(AppException):
+    """
+    Raised when a business rule is violated.
+    """
+
+    def __init__(
+        self,
+        message: str = "Business rule violation.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=400,
+            errors=errors,
+        )
