@@ -6,13 +6,13 @@ from src.services.auth_service import AuthService
 from src.schemas.common_schema import APIResponse
 from src.schemas.auth_schema import RegisterRequest, loginRequest
 from src.core.security import set_auth_cookies
-from src.core.dependencies import get_db, get_current_user, get_current_user_from_refresh
+from src.core.dependencies import get_db, get_current_user, get_current_user_from_refresh, require_superuser
 from src.core.security import clear_auth_cookies
 from src.models.user_model import User
 
 auth_router = APIRouter(tags=["auth"], prefix="/api/v1")
 
-@auth_router.post("/register")
+@auth_router.post("/register", dependencies=[Depends(require_superuser)])
 async def register_user(user_create: RegisterRequest, session: AsyncSession = Depends(get_db)):
     user_repository = UserRepository(session)
     auth_service = AuthService(user_repository)

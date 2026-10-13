@@ -1,5 +1,13 @@
 from datetime import datetime
+from html import escape
+from urllib.parse import quote
+
 from src.core.config import settings
+
+
+def _single_line(value: str) -> str:
+    """Collapse CR/LF so user input can't inject email headers."""
+    return " ".join(value.splitlines()).strip()
 
 
 class ContactEmailTemplate:
@@ -11,7 +19,10 @@ class ContactEmailTemplate:
 
     @staticmethod
     def generate_email_template(name: str, email: str, message: str) -> tuple[str, str]:
-        subject = f"🚀 New Portfolio Contact | {name}"
+        subject = f"🚀 New Portfolio Contact | {_single_line(name)[:100]}"
+        reply_href = escape(f"mailto:{quote(_single_line(email), safe='@.+-_')}")
+        # All visitor input is escaped before it is placed in the HTML body.
+        name, email, message = escape(name), escape(email), escape(message)
 
         received_on = datetime.now().strftime("%B %d, %Y, %I:%M %p")
 
@@ -218,7 +229,7 @@ white-space:pre-wrap;
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:30px;">
 <tr>
 <td align="center" style="padding:0 8px;">
-<a href="mailto:{email}" target="_blank" style="
+<a href="{reply_href}" target="_blank" style="
 display:block;
 background:linear-gradient(135deg,#A855F7,#7C3AED);
 color:#FFFFFF;

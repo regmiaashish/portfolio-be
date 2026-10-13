@@ -2,7 +2,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from loguru import logger
 from src.api.api_router import api_router
 from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
@@ -17,8 +16,6 @@ rate_limiter = Limiter(key_func=get_remote_address)  # Use remote address for ra
 async def read_root(
     request: Request
 ):
-    logger.warning(f"Rate limit exceeded for IP: {get_remote_address(request)}")
-    logger.info(f"Gemini API key is : Hahahahahahahahah laaaazzz lagena, huh????")
     return {"message": "Hello from Aashish! Backend Engineer. Welcome to my FastAPI application!"}
 
 
