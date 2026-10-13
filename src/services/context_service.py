@@ -1,10 +1,10 @@
 import asyncio
-import os
 from ipaddress import ip_address
 from urllib.parse import quote
 
 import httpx
 
+from src.core.config import settings
 from src.schemas.context_schema import VisitorContext, WeatherContext
 
 GEOLOCATION_URL = "https://ipapi.co/{ip}/json/"
@@ -12,7 +12,6 @@ WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 CURRENCY_URL = "https://api.frankfurter.app/latest"
 GEOLOCATION_FALLBACK_URL = "https://ipwho.is/{ip}"
 BASE_CURRENCY = "GBP"
-MOCK_CONTEXT_ENABLED = os.getenv("CONTEXT_MOCK", "false").lower() == "true"
 
 WEATHER_DESCRIPTIONS = {
     0: "clear skies",
@@ -138,7 +137,7 @@ async def _get_conversion_rate(client: httpx.AsyncClient, currency_code: str) ->
 
 
 async def get_visitor_context(visitor_ip: str) -> VisitorContext:
-    if MOCK_CONTEXT_ENABLED:
+    if settings.context_mock:
         return VisitorContext(
             ip=visitor_ip,
             city="London",

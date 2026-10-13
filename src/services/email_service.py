@@ -9,7 +9,7 @@ class EmailService:
         self.smtp_host = settings.smtp_host
         self.smtp_port = settings.smtp_port
         self.smtp_user = settings.smtp_user
-        self.smtp_password = settings.smtp_password
+        self.smtp_password = settings.smtp_password.get_secret_value()
 
     def send_email(
         self,

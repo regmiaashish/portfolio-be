@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from httpx import HTTPStatusError
 from loguru import logger
 
-from src.services.context_service import MOCK_CONTEXT_ENABLED, get_visitor_context
+from src.core.config import settings
+from src.services.context_service import get_visitor_context
 
 router = APIRouter(tags=["context"])
 
@@ -29,7 +30,7 @@ async def visitor_context(
             detail="A valid IPv4 or IPv6 address is required.",
         ) from exc
 
-    if not parsed_ip.is_global and not MOCK_CONTEXT_ENABLED:
+    if not parsed_ip.is_global and not settings.context_mock:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(

@@ -28,6 +28,16 @@ values as environment variables (see `tests/__init__.py` for a complete dummy se
 - Gunicorn + Uvicorn workers in a Docker image (`Dockerfile`, `scripts/run.sh`)
 - Tooling: ruff (lint + format, config in `pyproject.toml`), pytest
 
+## Configuration
+
+- All settings live in `src/core/config.py` (`Settings`, pydantic-settings) and every key is
+  documented in `.env.example`. Add new settings to both; `tests/test_config.py` fails if
+  `.env.example` falls out of sync.
+- `ENV` is `dev | test | prod` and **defaults to `prod`** (API docs hidden, strict checks such as a
+  32+ character `JWT_SECRET_KEY`). Local development sets `ENV=dev`.
+- Secrets are `SecretStr`: read them with `.get_secret_value()` at the point of use, never log them.
+- Unknown keys are ignored and empty values count as unset.
+
 ## Commands
 
 ```bash
