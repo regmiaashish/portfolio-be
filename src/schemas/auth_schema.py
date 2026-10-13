@@ -1,4 +1,8 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+
+def _normalise_email(value: str) -> str:
+    return value.strip().lower()
 
 
 class AuthTokens(BaseModel):
@@ -15,14 +19,12 @@ class RegisterRequest(BaseModel):
     email: EmailStr = Field(..., description="User's email address")
     password: str = Field(..., min_length=12, max_length=128, description="User's password")
 
+    normalise_email = field_validator("email")(_normalise_email)
 
-class loginRequest(BaseModel):
+
+class LoginRequest(BaseModel):
     email: EmailStr = Field(..., description="User's email address")
-    password: str = Field(..., description="User's password")
+    # max_length bounds the argon2 work an anonymous caller can trigger.
+    password: str = Field(..., min_length=1, max_length=128, description="User's password")
 
-
-class loginResponse(BaseModel):
-    message: str = Field(..., description="Response message")
-
-    class Config:
-        from_attributes = True
+    normalise_email = field_validator("email")(_normalise_email)

@@ -9,7 +9,7 @@ from src.schemas.contact_schema import ContactRequest
 from src.services.contact_service import contact_service
 
 limiter = Limiter(key_func=get_remote_address)
-router = APIRouter(tags=["Message"], prefix="/api/v1")
+router = APIRouter(tags=["Message"])
 
 
 @router.post("/contact", response_model=APIResponse, status_code=status.HTTP_200_OK)
@@ -33,5 +33,4 @@ async def contact(
         logger.error(f"Error sending contact email: {e}")
         raise EmailSendException(
             message="An error occurred while sending your message. Please try again later.",
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         ) from e

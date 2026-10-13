@@ -86,3 +86,38 @@ class BusinessRuleViolationError(AppException):
             status_code=400,
             errors=errors,
         )
+
+
+class AuthenticationError(AppException):
+    """
+    Raised when credentials are missing or invalid.
+    The message is deliberately generic so it doesn't reveal which part was wrong.
+    """
+
+    def __init__(
+        self,
+        message: str = "Invalid email or password.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=401,
+            errors=errors,
+        )
+
+
+class ConflictError(AppException):
+    """
+    Raised when a request conflicts with existing state, e.g. a duplicate email.
+    """
+
+    def __init__(
+        self,
+        message: str = "The resource already exists.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=409,
+            errors=errors,
+        )

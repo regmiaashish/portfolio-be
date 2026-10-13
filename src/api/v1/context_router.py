@@ -6,7 +6,7 @@ from loguru import logger
 
 from src.services.context_service import MOCK_CONTEXT_ENABLED, get_visitor_context
 
-router = APIRouter(tags=["context"], prefix="/api/v1")
+router = APIRouter(tags=["context"])
 
 
 @router.get("/context")

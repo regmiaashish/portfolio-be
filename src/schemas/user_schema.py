@@ -30,4 +30,5 @@ class UserRead(UserBase):
     is_active: bool
     is_superuser: bool
     created_at: datetime
-    updated_at: datetime
+    # NULL until the row is first updated.
+    updated_at: datetime | None = None

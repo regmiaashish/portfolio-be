@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from uuid import UUID
+
 from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,69 +9,60 @@ from src.core.database import AsyncSessionLocal
 from src.core.security import verify_token
 from src.models.user_model import User
 from src.repositories.user_repo import UserRepository
+from src.services.auth_service import AuthService
 
 
-async def get_db():
+async def get_db() -> AsyncIterator[AsyncSession]:
     async with AsyncSessionLocal() as session:
         yield session
 
 
-async def get_current_user(
-    session: AsyncSession = Depends(get_db),
-    access_token: str | None = Cookie(default=None, alias=settings.access_token_cookie_name),
-) -> User:
-    if not access_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
+def get_user_repository(session: AsyncSession = Depends(get_db)) -> UserRepository:
+    return UserRepository(session)
 
-    payload = verify_token(access_token, token_type="access")
+
+def get_auth_service(
+    user_repository: UserRepository = Depends(get_user_repository),
+) -> AuthService:
+    return AuthService(user_repository)
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+
+
+async def _user_from_token(token: str | None, token_type: str, repo: UserRepository) -> User:
+    if not token:
+        raise _unauthorized("Not authenticated.")
+
+    payload = verify_token(token, token_type=token_type)
     if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token."
-        )
+        raise _unauthorized("Invalid or expired token.")
 
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload."
-        )
+    try:
+        user_id = UUID(str(payload.get("sub")))
+    except ValueError:
+        raise _unauthorized("Invalid token payload.") from None
 
-    user = await UserRepository(session).get_user_by_id(user_id)
-    if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive."
-        )
+    user = await repo.get_user_by_id(user_id)
+    if user is None or not user.is_active:
+        raise _unauthorized("User not found or inactive.")
 
     return user
+
+
+async def get_current_user(
+    repo: UserRepository = Depends(get_user_repository),
+    access_token: str | None = Cookie(default=None, alias=settings.access_token_cookie_name),
+) -> User:
+    return await _user_from_token(access_token, "access", repo)
 
 
 async def get_current_user_from_refresh(
-    session: AsyncSession = Depends(get_db),
+    repo: UserRepository = Depends(get_user_repository),
     refresh_token: str | None = Cookie(default=None, alias=settings.refresh_token_cookie_name),
 ) -> User:
-    if not refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token provided."
-        )
-
-    payload = verify_token(refresh_token, token_type="refresh")
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token."
-        )
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload."
-        )
-
-    user = await UserRepository(session).get_user_by_id(user_id)
-    if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive."
-        )
-
-    return user
+    return await _user_from_token(refresh_token, "refresh", repo)
 
 
 async def require_superuser(current_user: User = Depends(get_current_user)) -> User:

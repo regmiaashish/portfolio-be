@@ -1,25 +1,19 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from src.api.api_router import api_router
 from src.core.config import settings
+from src.core.error_handlers import register_exception_handlers
 
-app = FastAPI()
+app = FastAPI(
+    title="Aashish Regmi Portfolio API",
+    version="1.0.0",
+    description="Backend for the portfolio: contact, visitor context and admin auth.",
+)
 
+register_exception_handlers(app)
 app.include_router(api_router)
 
-rate_limiter = Limiter(key_func=get_remote_address)  # Use remote address for rate limiting
-
-
-@app.get("/")
-@rate_limiter.limit("5/minute")  # Limit to 5 requests per minute
-async def read_root(request: Request):
-    return {"message": "Hello from Aashish! Backend Engineer. Welcome to my FastAPI application!"}
-
-
-# --- Middleware ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
