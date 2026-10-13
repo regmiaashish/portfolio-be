@@ -2,7 +2,6 @@ import smtplib
 from email.message import EmailMessage
 
 from src.core.config import settings
-from src.templates.contact_template import contact_email_template
 
 
 class EmailService:
@@ -29,7 +28,9 @@ class EmailService:
         message["To"] = recipient
         message["Subject"] = subject
 
-        message.set_content("This email contains HTML content. Please view it in an email client that supports HTML.")
+        message.set_content(
+            "This email contains HTML content. Please view it in an email client that supports HTML."
+        )
         message.add_alternative(html, subtype="html")
 
         # Connect to SMTP server
@@ -37,7 +38,6 @@ class EmailService:
             self.smtp_host,
             self.smtp_port,
         ) as smtp:
-
             # Upgrade to encrypted connection
             smtp.starttls()
 

@@ -1,9 +1,14 @@
-from src.core.security import hash_password, verify_password, create_access_token, create_refresh_token
+from src.core.exceptions import BusinessRuleViolationError, RepositoryError, UserNotFoundException
+from src.core.security import (
+    create_access_token,
+    create_refresh_token,
+    hash_password,
+    verify_password,
+)
 from src.models.user_model import User
 from src.repositories.user_repo import UserRepository
-from src.core.exceptions import UserNotFoundException, RepositoryError, BusinessRuleViolationError
-from src.schemas.user_schema import UserUpdate
 from src.schemas.auth_schema import AuthTokens, RegisterRequest
+
 
 class AuthService:
     def __init__(self, user_repository: UserRepository):
@@ -29,7 +34,6 @@ class AuthService:
         if not user or not verify_password(password, user.hashed_password):
             raise UserNotFoundException("Invalid email or password.")
         return user
-        
 
     def issue_tokens(self, user: User) -> AuthTokens:
         claims = {
@@ -41,8 +45,7 @@ class AuthService:
             access_token=create_access_token(claims),
             refresh_token=create_refresh_token(claims),
         )
-        
-        
+
     async def update_password(self, user: User, new_password: str) -> None:
         if verify_password(new_password, user.hashed_password):
             raise BusinessRuleViolationError("New password cannot be the same as the old password.")

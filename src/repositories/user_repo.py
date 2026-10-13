@@ -1,8 +1,11 @@
 from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import RepositoryError, UserNotFoundException
 from src.models.user_model import User
-from src.core.exceptions import UserNotFoundException, RepositoryError
+
 
 class UserRepository:
     def __init__(self, session: AsyncSession):
@@ -19,7 +22,7 @@ class UserRepository:
         except UserNotFoundException:
             raise
         except Exception as e:
-            raise RepositoryError(f"Error retrieving user by ID: {str(e)}") from e
+            raise RepositoryError(f"Error retrieving user by ID: {e!s}") from e
 
     async def get_user_by_email(self, email: str) -> User | None:
         try:
@@ -27,8 +30,8 @@ class UserRepository:
             result = await self.session.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
-            raise RepositoryError(f"Error retrieving user by email: {str(e)}") from e
-        
+            raise RepositoryError(f"Error retrieving user by email: {e!s}") from e
+
     async def create_user(self, user: User) -> User:
         try:
             self.session.add(user)
@@ -37,8 +40,8 @@ class UserRepository:
             return user
         except Exception as e:
             await self.session.rollback()
-            raise RepositoryError(f"Error creating user: {str(e)}") from e
-        
+            raise RepositoryError(f"Error creating user: {e!s}") from e
+
     async def update_user(self, user: User) -> User:
         try:
             await self.session.commit()
@@ -46,16 +49,15 @@ class UserRepository:
             return user
         except Exception as e:
             await self.session.rollback()
-            raise RepositoryError(f"Error updating user: {str(e)}") from e
-        
+            raise RepositoryError(f"Error updating user: {e!s}") from e
 
     async def get_superuser(self) -> list[User]:
         try:
-            query = select(User).where(User.is_superuser == True)
+            query = select(User).where(User.is_superuser == True)  # noqa: E712 -- SQLAlchemy column expression
             result = await self.session.execute(query)
             superuser = result.scalar_one_or_none()
             if not superuser:
                 raise UserNotFoundException("No superuser found.")
             return superuser
         except Exception as e:
-            raise RepositoryError(f"Error retrieving superusers: {str(e)}") from e
+            raise RepositoryError(f"Error retrieving superusers: {e!s}") from e

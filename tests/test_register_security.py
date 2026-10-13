@@ -55,9 +55,7 @@ def test_register_by_superuser_creates_regular_user(client, fake_repo):
     response = client.post(REGISTER_URL, json=VALID_PAYLOAD)
 
     assert response.status_code == 200
-    created = next(
-        u for u in fake_repo.users.values() if u.email == VALID_PAYLOAD["email"]
-    )
+    created = next(u for u in fake_repo.users.values() if u.email == VALID_PAYLOAD["email"])
     assert created.is_superuser is False
     assert created.is_active is True
 

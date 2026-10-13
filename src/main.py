@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
 from src.api.api_router import api_router
-from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
 
 app = FastAPI()
@@ -11,11 +11,11 @@ app = FastAPI()
 app.include_router(api_router)
 
 rate_limiter = Limiter(key_func=get_remote_address)  # Use remote address for rate limiting
+
+
 @app.get("/")
 @rate_limiter.limit("5/minute")  # Limit to 5 requests per minute
-async def read_root(
-    request: Request
-):
+async def read_root(request: Request):
     return {"message": "Hello from Aashish! Backend Engineer. Welcome to my FastAPI application!"}
 
 

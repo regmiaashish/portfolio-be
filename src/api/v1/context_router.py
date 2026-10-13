@@ -4,9 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from httpx import HTTPStatusError
 from loguru import logger
 
-from src.services.context_service import get_visitor_context
-from src.services.context_service import MOCK_CONTEXT_ENABLED
-
+from src.services.context_service import MOCK_CONTEXT_ENABLED, get_visitor_context
 
 router = APIRouter(tags=["context"], prefix="/api/v1")
 
