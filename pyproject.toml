@@ -11,6 +11,7 @@ dependencies = [
     "boto3>=1.43.51",
     "fastapi[standard]>=0.139.2",
     "gunicorn>=26.0.0",
+    "httpx>=0.28.1,<1",
     "loguru>=0.7.3",
     "pydantic-settings>=2.14.2",
     "python-jose>=3.5.0",
