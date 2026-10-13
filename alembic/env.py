@@ -9,7 +9,7 @@ sys.path.insert(0, abspath(dirname(dirname(__file__))))
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
-import src.models.user_model  # noqa: F401 — registers User with Base.metadata
+import src.models  # noqa: F401 -- registers every model with Base.metadata
 from alembic import context
 from src.core.config import settings
 from src.core.database import Base

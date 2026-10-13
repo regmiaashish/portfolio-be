@@ -96,7 +96,13 @@ Conventions:
 - Responses use `APIResponse` from `src/schemas/common_schema.py`; errors use `ErrorResponse`.
 - Schemas that accept user input set `extra="forbid"` when unexpected fields could be dangerous
   (for example privilege fields on registration).
-- New tables need a model in `src/models/` **and** an Alembic migration.
+- New tables need a model in `src/models/` (imported in `src/models/__init__.py`) **and** an
+  Alembic migration. Generate it with `make migration M="..."` against a throwaway database,
+  review it, then confirm `make migrate-check` reports no differences.
+- Constraint names follow the naming convention in `src/core/database.py` (PostgreSQL's own
+  defaults). In migrations, wrap explicit names in `op.f(...)` so the convention isn't applied twice.
+- Production migrations: see `docs/DB_MIGRATION_RUNBOOK.md`. `scripts/run.sh` only migrates on
+  start when `RUN_MIGRATIONS=true`.
 
 ## Testing
 
