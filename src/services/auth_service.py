@@ -2,14 +2,14 @@ from src.core.security import hash_password, verify_password, create_access_toke
 from src.models.user_model import User
 from src.repositories.user_repo import UserRepository
 from src.core.exceptions import UserNotFoundException, RepositoryError, BusinessRuleViolationError
-from src.schemas.user_schema import UserCreate, UserUpdate
-from src.schemas.auth_schema import AuthTokens
+from src.schemas.user_schema import UserUpdate
+from src.schemas.auth_schema import AuthTokens, RegisterRequest
 
 class AuthService:
     def __init__(self, user_repository: UserRepository):
         self.user_repository = user_repository
 
-    async def register_user(self, user_create: UserCreate) -> User:
+    async def register_user(self, user_create: RegisterRequest) -> User:
         hashed_password = hash_password(user_create.password)
         existing_email = await self.user_repository.get_user_by_email(user_create.email)
         if existing_email:
@@ -19,8 +19,8 @@ class AuthService:
                 name=user_create.name,
                 email=user_create.email,
                 hashed_password=hashed_password,
-                is_active=user_create.is_active,
-                is_superuser=user_create.is_superuser,
+                is_active=True,
+                is_superuser=False,
             )
             return await self.user_repository.create_user(user)
 

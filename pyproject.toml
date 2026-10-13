@@ -11,10 +11,17 @@ dependencies = [
     "boto3>=1.43.51",
     "fastapi[standard]>=0.139.2",
     "gunicorn>=26.0.0",
+    "httpx>=0.28.1,<1",
     "loguru>=0.7.3",
     "pydantic-settings>=2.14.2",
     "python-jose>=3.5.0",
     "slowapi>=0.1.10",
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
 ]
