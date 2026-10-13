@@ -23,10 +23,12 @@ values as environment variables (see `tests/__init__.py` for a complete dummy se
 - Python 3.12, managed with `uv` (`pyproject.toml` + `uv.lock`)
 - FastAPI + Pydantic v2 + pydantic-settings
 - SQLAlchemy 2 (async) + asyncpg, Alembic migrations, PostgreSQL (Neon in production)
-- Auth: argon2 password hashing, HS256 JWTs in HttpOnly cookies
+- Auth: argon2 password hashing, HS256 JWTs (PyJWT) in HttpOnly cookies
 - slowapi rate limiting, loguru logging, httpx for outbound HTTP
 - Gunicorn + Uvicorn workers in a Docker image (`Dockerfile`, `scripts/run.sh`)
-- Tooling: ruff (lint + format, config in `pyproject.toml`), pytest
+- Installed for Phase 4 (Pitch Me), not yet imported: langgraph, langchain-google-genai,
+  tavily-python, sse-starlette, cachetools
+- Tooling: ruff (lint + format, config in `pyproject.toml`), pytest, pytest-asyncio, respx
 
 ## Configuration
 

@@ -1,10 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import Response
-from jose import JWTError, jwt
 
 from src.core.config import settings
 
@@ -78,9 +78,11 @@ def verify_token(token: str, token_type: str = "access") -> dict[str, Any] | Non
         payload = jwt.decode(
             token,
             settings.jwt_secret_key.get_secret_value(),
+            # A fixed allow-list: the token's own "alg" header is never trusted (no "none").
             algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "iat", "sub", "type"]},
         )
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
     if payload.get("type") != token_type:
