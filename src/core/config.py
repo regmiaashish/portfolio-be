@@ -2,7 +2,7 @@ import json
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, IPvAnyNetwork, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_PROD_JWT_SECRET_LENGTH = 32
@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     # --- CORS ---
     # NoDecode: accept a JSON list or a comma-separated string (see split_origins).
     allowed_origins: Annotated[list[str], NoDecode] = []
+
+    # --- Client IP and rate limiting ---
+    # Proxies whose forwarding headers are believed (CIDRs or single IPs). Empty = trust
+    # no one and rate-limit by the TCP peer address. See .env.example for examples.
+    trusted_proxy_ips: Annotated[list[IPvAnyNetwork], NoDecode] = []
+    # Which header a trusted proxy uses to pass on the visitor's address.
+    client_ip_header: Literal["x-forwarded-for", "cf-connecting-ip"] = "x-forwarded-for"
+    # "memory://" is per worker process; use redis://... to share limits across workers.
+    rate_limit_storage_uri: str = "memory://"
 
     # --- Email (contact form) ---
     smtp_host: str
@@ -90,9 +99,16 @@ class Settings(BaseSettings):
                 return [str(origin).strip() for origin in parsed]
         return value
 
-    @field_validator("cookie_samesite", mode="before")
+    @field_validator("trusted_proxy_ips", mode="before")
     @classmethod
-    def lowercase_samesite(cls, value: object) -> object:
+    def split_proxies(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("client_ip_header", "cookie_samesite", mode="before")
+    @classmethod
+    def lowercase_choice(cls, value: object) -> object:
         return value.lower() if isinstance(value, str) else value
 
     @model_validator(mode="after")

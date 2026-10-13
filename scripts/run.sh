@@ -14,5 +14,6 @@ exec gunicorn src.main:app \
     --timeout "${GUNICORN_TIMEOUT:-60}" \
     --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-30}" \
     --keep-alive "${GUNICORN_KEEPALIVE:-5}" \
+    --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
     --access-logfile - \
     --error-logfile -

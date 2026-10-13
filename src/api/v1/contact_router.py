@@ -1,19 +1,17 @@
 from fastapi import APIRouter, BackgroundTasks, Request, status
 from loguru import logger
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from src.core.exceptions import EmailSendException
+from src.core.rate_limit import CONTACT_LIMIT, limiter
 from src.schemas.common_schema import APIResponse
 from src.schemas.contact_schema import ContactRequest
 from src.services.contact_service import contact_service
 
-limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(tags=["Message"])
 
 
 @router.post("/contact", response_model=APIResponse, status_code=status.HTTP_200_OK)
-@limiter.limit("5/minute")
+@limiter.limit(CONTACT_LIMIT)
 async def contact(
     request: Request, contact_request: ContactRequest, background_tasks: BackgroundTasks
 ):

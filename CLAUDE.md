@@ -38,6 +38,14 @@ values as environment variables (see `tests/__init__.py` for a complete dummy se
 - Secrets are `SecretStr`: read them with `.get_secret_value()` at the point of use, never log them.
 - Unknown keys are ignored and empty values count as unset.
 
+## Rate limiting and client IP
+
+- One shared `limiter` in `src/core/rate_limit.py`; limits are named constants there
+  (`CONTACT_LIMIT`, `LOGIN_LIMIT`). Decorated endpoints need a `request: Request` parameter.
+- The key is `client_ip()`: forwarding headers are believed **only** from peers in
+  `TRUSTED_PROXY_IPS` (empty by default). Never key limits on a raw header.
+- Storage defaults to `memory://` (per worker process); tests reset it in `conftest.py`.
+
 ## Commands
 
 ```bash

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.api_router import api_router
 from src.core.config import Settings, settings
 from src.core.error_handlers import register_exception_handlers
+from src.core.rate_limit import limiter
 
 
 def create_app(app_settings: Settings = settings) -> FastAPI:
@@ -19,6 +20,7 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         openapi_url="/openapi.json" if docs_enabled else None,
     )
 
+    app.state.limiter = limiter
     register_exception_handlers(app)
     app.include_router(api_router)
 

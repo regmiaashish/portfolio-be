@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from src.api.health_router import get_db_probe
 from src.core.dependencies import get_db, get_user_repository
+from src.core.rate_limit import limiter
 from src.core.security import create_access_token, hash_password
 from src.main import app
 from src.models.user_model import User
@@ -53,6 +54,9 @@ def fake_repo() -> FakeUserRepository:
 
 
 def _install_overrides(repo: FakeUserRepository) -> None:
+    # Each test starts with empty rate-limit counters.
+    limiter.reset()
+
     async def no_db():
         yield None
 

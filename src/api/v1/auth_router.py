@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from src.core.dependencies import (
     get_auth_service,
@@ -6,6 +6,7 @@ from src.core.dependencies import (
     get_current_user_from_refresh,
     require_superuser,
 )
+from src.core.rate_limit import LOGIN_LIMIT, limiter
 from src.core.security import clear_auth_cookies, set_auth_cookies
 from src.models.user_model import User
 from src.schemas.auth_schema import LoginRequest, RegisterRequest
@@ -38,8 +39,17 @@ async def register_user(
     return APIResponse(message="User registered successfully.")
 
 
-@router.post("/login", response_model=APIResponse, responses=_UNAUTHORIZED)
+@router.post(
+    "/login",
+    response_model=APIResponse,
+    responses={
+        **_UNAUTHORIZED,
+        429: {"model": ErrorResponse, "description": "Too many login attempts"},
+    },
+)
+@limiter.limit(LOGIN_LIMIT)
 async def login_user(
+    request: Request,
     credentials: LoginRequest,
     response: Response,
     auth_service: AuthService = Depends(get_auth_service),
