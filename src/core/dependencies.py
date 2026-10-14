@@ -25,6 +25,7 @@ from src.services.contact_service import ContactDelivery, ContactService, own_se
 from src.services.content_service import ContentService
 from src.services.context_service import ContextService
 from src.services.email_service import EmailSender, email_service
+from src.services.media_service import MediaService
 from src.services.pitch.graph import PitchPipeline
 from src.services.pitch.history import PitchHistoryService, PitchRecorder
 from src.services.pitch.llm import create_llm
@@ -206,6 +207,12 @@ def require_csrf(
 
 def get_storage(request: Request) -> StorageService | None:
     return getattr(request.app.state, "storage", None)
+
+
+def get_media_service(
+    storage: StorageService | None = Depends(get_storage),
+) -> MediaService:
+    return MediaService(storage)
 
 
 def get_content_service(

@@ -238,4 +238,27 @@ with fields `purpose` (`"project_image"` | `"resume"`, default `project_image`) 
 - Audit-logged with the admin's email.
 
 AWS needs no bucket CORS for this; the key still needs `s3:PutObject`, `s3:GetObject`,
-`s3:DeleteObject` on the prefix, and images need public read (or CloudFront) to display.
+`s3:DeleteObject` on the prefix. To display, images need public read, CloudFront, or (simplest)
+the media endpoint below.
+
+## Media via the API (Phase 6.2)
+
+Lets the S3 bucket stay private: the API serves uploaded files itself, and Cloudflare caches them.
+
+`GET` / `HEAD /api/v1/media/{key}` — public, no auth, rate limit `240/minute`.
+
+- Only keys the upload endpoints issue: `<S3_UPLOAD_PREFIX>projects/<uuid4>.<png|jpg|webp|avif>`
+  and `<S3_UPLOAD_PREFIX>resume/<uuid4>.pdf` (lowercase uuid, exact match; `is_issued_key()`).
+  Anything else, and any percent-encoded path, is 404 `media_not_found` without touching S3, so
+  nothing else in the bucket can be read or probed. A missing object is the same 404.
+- 503 `uploads_disabled` when S3 is not configured; S3 failures → 502 `storage_error`.
+- 200 headers: `Content-Type` from the key's extension (`image/png`, `image/jpeg`, `image/webp`,
+  `image/avif`, `application/pdf`; never S3 metadata), `Content-Length`, `ETag`, `Last-Modified`,
+  `Cache-Control: public, max-age=31536000, immutable`, `Content-Disposition: inline`,
+  `X-Content-Type-Options: nosniff`. No `X-Frame-Options`: the résumé page embeds the PDF.
+- `If-None-Match` matching the ETag (or `*`, weak or not) → 304. `HEAD` → same headers, no body.
+
+URLs: set `S3_PUBLIC_BASE_URL=<API origin>/api/v1/media` and nothing else changes. Image
+`url`s, the upload response's `public_url` and the résumé URL all point at this endpoint; the
+old-résumé cleanup recognises them as our own; `GET /resume/download` still redirects to a
+presigned S3 GET (attachment).
