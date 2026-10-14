@@ -677,3 +677,226 @@ def test_seed_matches_the_validation_rules():
     assert seed["projects"][0].slug == "fagoon-upgrade"
     assert all(p.published for p in seed["projects"])
     assert all(p.image is None for p in seed["projects"])
+
+
+# --- Résumé (Phase 5) ------------------------------------------------------------------------
+
+RESUME_UPLOAD = {
+    "filename": "Aashish-Regmi-CV.pdf",
+    "content_type": "application/pdf",
+    "size": 200_000,
+    "purpose": "resume",
+}
+CDN = "https://cdn.example.com"
+
+
+@pytest.fixture
+def cdn(monkeypatch):
+    """A public base URL, so uploaded résumés have recognisable URLs."""
+    monkeypatch.setattr(settings, "s3_public_base_url", CDN)
+    return f"{CDN}/{settings.s3_upload_prefix}resume/"
+
+
+def save_profile(admin_client, **changes):
+    profile = load_seed()["profile"].model_dump(mode="json")
+    profile.update(changes)
+    return admin_client.put(f"{ADMIN}/profile", json=profile, headers=CSRF)
+
+
+def test_seed_profile_has_no_resume(content_client, seeded):
+    assert content_client.get("/api/v1/content").json()["profile"]["resume_url"] is None
+
+
+def test_resume_url_round_trips_public_and_admin(admin_client, seeded):
+    url = "https://drive.example.com/aashish-cv.pdf"
+
+    response = save_profile(admin_client, resume_url=url)
+
+    assert response.status_code == 200
+    assert response.json()["resume_url"] == url
+    assert admin_client.get("/api/v1/content").json()["profile"]["resume_url"] == url
+    assert admin_client.get(f"{ADMIN}/content").json()["profile"]["resume_url"] == url
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["javascript:alert(1)", "ftp://example.com/cv.pdf", "cv.pdf", "https://e.com/" + "x" * 300],
+)
+def test_resume_url_validation(admin_client, seeded, value):
+    assert_error(save_profile(admin_client, resume_url=value), 422)
+
+
+def test_resume_upload_presign(admin_client, fakes):
+    response = admin_client.post(f"{ADMIN}/uploads", json=RESUME_UPLOAD, headers=CSRF)
+
+    assert response.status_code == 200
+    key = response.json()["key"]
+    assert key.startswith(f"{settings.s3_upload_prefix}resume/")
+    assert key.endswith(".pdf")
+    assert "Aashish" not in key
+    assert fakes.storage.presigned[-1]["content_type"] == "application/pdf"
+
+
+def test_resume_upload_rejects_images(admin_client):
+    body = {**RESUME_UPLOAD, "content_type": "image/png"}
+
+    error = assert_error(admin_client.post(f"{ADMIN}/uploads", json=body, headers=CSRF), 422)
+
+    assert error["errors"][0]["loc"] == ["body", "content_type"]
+
+
+def test_project_image_upload_rejects_pdf(admin_client):
+    body = {**RESUME_UPLOAD, "purpose": "project_image"}
+
+    assert_error(admin_client.post(f"{ADMIN}/uploads", json=body, headers=CSRF), 422)
+
+
+def test_pdf_defaults_to_project_image_purpose_and_is_rejected(admin_client):
+    body = {k: v for k, v in RESUME_UPLOAD.items() if k != "purpose"}
+
+    assert_error(admin_client.post(f"{ADMIN}/uploads", json=body, headers=CSRF), 422)
+
+
+def test_unknown_upload_purpose_is_rejected(admin_client):
+    body = {**RESUME_UPLOAD, "purpose": "avatar"}
+
+    assert_error(admin_client.post(f"{ADMIN}/uploads", json=body, headers=CSRF), 422)
+
+
+def test_resume_key_is_never_accepted_as_a_project_image(admin_client):
+    key = admin_client.post(f"{ADMIN}/uploads", json=RESUME_UPLOAD, headers=CSRF).json()["key"]
+    image = {"key": key, "alt": "CV", "width": 100, "height": 100}
+
+    response = admin_client.post(f"{ADMIN}/projects", json=project_body(image=image), headers=CSRF)
+
+    assert_error(response, 422)
+
+
+def test_replacing_an_uploaded_resume_deletes_the_old_pdf(admin_client, seeded, cdn):
+    old = f"{cdn}{uuid.uuid4()}.pdf"
+    new = f"{cdn}{uuid.uuid4()}.pdf"
+    save_profile(admin_client, resume_url=old)
+
+    assert save_profile(admin_client, resume_url=new).status_code == 200
+
+    assert seeded.storage.deleted == [old.removeprefix(f"{CDN}/")]
+
+
+def test_removing_an_uploaded_resume_deletes_it(admin_client, seeded, cdn):
+    old = f"{cdn}{uuid.uuid4()}.pdf"
+    save_profile(admin_client, resume_url=old)
+
+    save_profile(admin_client, resume_url=None)
+
+    assert seeded.storage.deleted == [old.removeprefix(f"{CDN}/")]
+
+
+def test_resaving_the_same_resume_deletes_nothing(admin_client, seeded, cdn):
+    url = f"{cdn}{uuid.uuid4()}.pdf"
+    save_profile(admin_client, resume_url=url)
+
+    save_profile(admin_client, resume_url=url, tagline="New tagline.")
+
+    assert seeded.storage.deleted == []
+
+
+def test_external_resume_links_are_never_deleted(admin_client, seeded, cdn):
+    save_profile(admin_client, resume_url="https://drive.example.com/cv.pdf")
+    save_profile(admin_client, resume_url=f"{CDN}/{settings.s3_upload_prefix}projects/x.pdf")
+
+    save_profile(admin_client, resume_url=None)
+
+    assert seeded.storage.deleted == []
+
+
+def test_resume_cleanup_failure_does_not_fail_the_save(admin_client, seeded, cdn):
+    save_profile(admin_client, resume_url=f"{cdn}{uuid.uuid4()}.pdf")
+    seeded.storage.fail_delete = True
+
+    assert save_profile(admin_client, resume_url=None).status_code == 200
+
+
+# --- Sitemap (Phase 5) -----------------------------------------------------------------------
+
+SITE = "https://aashish-regmi.com.np"
+
+
+@pytest.fixture
+def site_url(monkeypatch):
+    monkeypatch.setattr(settings, "portfolio_url", f"{SITE}/")
+    return SITE
+
+
+def parse_sitemap(response):
+    from xml.etree import ElementTree
+
+    ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    root = ElementTree.fromstring(response.content)
+    assert root.tag == "{http://www.sitemaps.org/schemas/sitemap/0.9}urlset"
+    return [
+        (url.find("s:loc", ns).text, getattr(url.find("s:lastmod", ns), "text", None))
+        for url in root.findall("s:url", ns)
+    ]
+
+
+def test_sitemap_on_an_empty_database_lists_only_home(content_client, site_url):
+    response = content_client.get("/sitemap.xml")
+
+    assert response.status_code == 200
+    assert parse_sitemap(response) == [(f"{SITE}/", None)]
+
+
+def test_sitemap_headers_and_declaration(content_client, seeded, site_url):
+    response = content_client.get("/sitemap.xml")
+
+    assert response.headers["content-type"].startswith("application/xml")
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    assert response.content.startswith(b'<?xml version="1.0" encoding="UTF-8"?>\n<urlset')
+
+
+def test_sitemap_lists_published_projects_in_order(admin_client, seeded, site_url):
+    hidden = admin_client.post(
+        f"{ADMIN}/projects", json=project_body(slug="draft", published=False), headers=CSRF
+    )
+    assert hidden.status_code == 201
+
+    locations = [loc for loc, _ in parse_sitemap(admin_client.get("/sitemap.xml"))]
+
+    assert locations == [
+        f"{SITE}/",
+        f"{SITE}/work/fagoon-upgrade",
+        f"{SITE}/work/gains-garage",
+        f"{SITE}/work/alliance",
+        f"{SITE}/work/jarvis",
+        f"{SITE}/work/cricket-management-system",
+    ]
+
+
+def test_sitemap_lastmod_is_a_date(content_client, seeded, site_url):
+    import re
+
+    entries = parse_sitemap(content_client.get("/sitemap.xml"))
+
+    assert all(lastmod and re.fullmatch(r"\d{4}-\d{2}-\d{2}", lastmod) for _, lastmod in entries)
+    assert entries[0][1] == "2026-10-14"
+
+
+def test_sitemap_escapes_special_characters():
+    from datetime import UTC, datetime
+
+    from src.api.sitemap_router import build_sitemap
+
+    xml = build_sitemap(
+        "https://example.com/?a=1&b=<2>", datetime(2026, 1, 2, 23, 30, tzinfo=UTC), [("a&b", None)]
+    )
+
+    assert b"&amp;b=&lt;2&gt;/" in xml
+    assert b"/work/a%26b</loc>" in xml
+    assert b"<lastmod>2026-01-02</lastmod>" in xml
+
+
+def test_sitemap_is_rate_limited(content_client, site_url):
+    statuses = [content_client.get("/sitemap.xml").status_code for _ in range(31)]
+
+    assert statuses[:30] == [200] * 30
+    assert statuses[30] == 429

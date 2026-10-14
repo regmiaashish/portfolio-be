@@ -96,5 +96,20 @@ async def test_seed_is_idempotent_and_repositories_work(tmp_path):
             reordered = await ProjectRepository(session).list_all()
             assert [p.id for p in reordered] == reversed_ids
             assert [p.position for p in reordered] == list(range(5))
+
+        # Phase 5: the resume_url column (migration 0005) round-trips, and the sitemap reads
+        # only published projects.
+        async with sessions() as session:
+            service = _service(session)
+            profile_input = seed["profile"].model_copy(
+                update={"resume_url": "https://example.com/cv.pdf"}
+            )
+            saved = await service.update_profile(profile_input)
+            assert saved.resume_url == "https://example.com/cv.pdf"
+            home, entries = await service.sitemap_entries()
+            assert home is not None
+            reordered_slugs = [p.slug for p in await service.projects.list_published()]
+            assert [slug for slug, _ in entries] == reordered_slugs
+            assert len(entries) == 5
     finally:
         await engine.dispose()

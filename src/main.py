@@ -7,9 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.api_router import api_router
 from src.core.config import Settings, settings
+from src.core.database import AsyncSessionLocal
 from src.core.error_handlers import register_exception_handlers
 from src.core.rate_limit import limiter
 from src.services.context_service import ContextService
+from src.services.pitch.history import DbPitchRecorder
 from src.services.pitch.stream import PitchCache
 from src.services.storage_service import create_storage
 
@@ -23,9 +25,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.http_client = client
         app.state.context_service = ContextService(client)
         app.state.pitch_cache = PitchCache(settings.pitch_cache_ttl_hours)
+        # Pitch history: each finished run is written in the background with its own session.
+        app.state.pitch_recorder = DbPitchRecorder(AsyncSessionLocal)
         # S3 client for admin image uploads; None when no bucket is configured.
         app.state.storage = create_storage(settings)
         yield
+        await app.state.pitch_recorder.drain()  # let in-flight history writes finish
 
 
 def create_app(app_settings: Settings = settings) -> FastAPI:

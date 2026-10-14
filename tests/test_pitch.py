@@ -19,6 +19,7 @@ from src.core.config import Settings, settings
 from src.core.dependencies import (
     get_pitch_cache,
     get_pitch_pipeline_factory,
+    get_pitch_recorder,
     get_pitch_usage_repository,
 )
 from src.main import app
@@ -79,6 +80,16 @@ class FailingLLM(FakeLLM):
         raise PitchUpstreamError("Gemini completion failed: ResourceExhausted key=AIza-secret")
 
 
+class FakeRecorder:
+    """Collects Pitch history entries instead of writing them to a database."""
+
+    def __init__(self):
+        self.results = []
+
+    def record(self, result) -> None:
+        self.results.append(result)
+
+
 class Pipelines:
     """Builds pipelines on demand and remembers them, so tests can count paid runs."""
 
@@ -95,6 +106,11 @@ class Pipelines:
 
 @pytest.fixture
 def pitch(client, monkeypatch):
+    return install_pitch_fakes(monkeypatch)
+
+
+def install_pitch_fakes(monkeypatch):
+    """Pitch Me switched on with fake usage, cache, pipelines and history recorder."""
     monkeypatch.setattr(settings, "pitch_enabled", True)
     monkeypatch.setattr(settings, "pitch_daily_cap", 100)
     monkeypatch.setattr(settings, "pitch_timeout_seconds", 45)
@@ -102,6 +118,8 @@ def pitch(client, monkeypatch):
     app.dependency_overrides[get_pitch_usage_repository] = lambda: usage
     app.dependency_overrides[get_pitch_cache] = lambda: cache
     app.dependency_overrides[get_pitch_pipeline_factory] = lambda: pipelines
+    # Pitch history goes to an in-memory fake; tests/test_pitch_history.py inspects it.
+    app.dependency_overrides[get_pitch_recorder] = FakeRecorder
     return usage, cache, pipelines
 
 

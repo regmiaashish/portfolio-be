@@ -131,6 +131,10 @@ Conventions:
   `<research>` tags, with `UNTRUSTED_RULE` in the system prompt; scraped `<`/`>` are escaped.
 - The pipeline runs in its own task behind a queue: the deadline (`PITCH_TIMEOUT_SECONDS`) and
   client disconnects cancel it so no further paid calls are made.
+- Pitch history (`pitch_runs`, admin `/admin/pitches`): every run that started streaming is
+  recorded when it ends via `PitchRecorder.record()`, a non-blocking call (the DB recorder writes
+  in its own background task and session, logs failures, never touches the stream). Store **no**
+  IP or other visitor data. Tests override `get_pitch_recorder` with a fake.
 - Tests and local dev use `PITCH_LLM_PROVIDER=fake` / `PITCH_RESEARCH_PROVIDER=fake`; the prod
   settings validator refuses fakes and missing keys when `PITCH_ENABLED=true`. Never call real
   providers from tests or scripts.
@@ -153,6 +157,12 @@ Conventions:
   best-effort and never fails a request. Tests use `tests/content_fakes.py`; never real S3.
 - Seed: `src/data/seed_content.json` via `scripts/seed_content.py` / `make seed-content`, which only
   fills empty tables (never overwrites admin edits).
+- Uploads have a `purpose` (`UPLOAD_RULES` in `content_schema.py`): `project_image` (images,
+  `projects/` folder) or `resume` (PDF, `resume/` folder). A key from one folder is never valid
+  for the other. Replacing the profile's `resume_url` deletes the old PDF only when it lives under
+  our own `<public base>/<prefix>resume/`; external links are never touched.
+- SEO: `GET /sitemap.xml` (root, `src/api/sitemap_router.py`) lists `PORTFOLIO_URL` plus
+  `/work/<slug>` for published projects; the frontend's `robots.txt` points to it.
 
 ## Testing
 

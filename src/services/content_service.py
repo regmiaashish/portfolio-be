@@ -27,7 +27,7 @@ from src.repositories.content_repo import (
     SkillGroupRepository,
 )
 from src.schemas.content_schema import (
-    EXTENSIONS,
+    UPLOAD_RULES,
     AdminCareerOut,
     AdminContentOut,
     AdminImageOut,
@@ -56,6 +56,17 @@ def public_url(key: str) -> str:
     return f"{base}/{key}" if base else key
 
 
+def own_resume_key(url: str | None) -> str | None:
+    """The S3 key if `url` is a résumé we uploaded ourselves; None for any other URL."""
+    base = settings.s3_base_url
+    if not url or not base:
+        return None
+    folder_url = f"{base}/{settings.s3_upload_prefix}resume/"
+    if not url.startswith(folder_url) or len(url) == len(folder_url):
+        return None
+    return url[len(base) + 1 :]
+
+
 # --- Model -> schema ---------------------------------------------------------------------
 
 
@@ -72,6 +83,7 @@ def profile_out(profile: SiteProfile) -> ProfileOut:
         email=profile.email,
         phone=phone,
         socials=[SocialOut(**social) for social in profile.socials or []],
+        resume_url=profile.resume_url,
     )
 
 
@@ -158,6 +170,7 @@ def _profile_columns(data: ProfileInput) -> dict[str, Any]:
         "phone_display": data.phone.display if data.phone else None,
         "phone_href": data.phone.href if data.phone else None,
         "socials": [social.model_dump() for social in data.socials],
+        "resume_url": data.resume_url,
     }
 
 
@@ -234,10 +247,32 @@ class ContentService:
             ),
         )
 
+    async def sitemap_entries(self) -> tuple[datetime | None, list[tuple[str, datetime | None]]]:
+        """(home page lastmod, [(slug, lastmod)] for published projects). Works on an empty DB."""
+        profile = await self.profiles.get()
+        projects = await self.projects.list_published()
+        career = await self.career.list_all()
+        skills = await self.skills.list_all()
+        home = _latest(
+            [
+                profile.updated_at if profile else None,
+                *(item.updated_at for item in [*projects, *career, *skills]),
+            ]
+        )
+        return home, [(project.slug, project.updated_at) for project in projects]
+
     # --- Profile -------------------------------------------------------------------------
 
     async def update_profile(self, data: ProfileInput) -> ProfileOut:
-        return profile_out(await self.profiles.save(**_profile_columns(data)))
+        current = await self.profiles.get()
+        old_resume = current.resume_url if current else None
+        saved = await self.profiles.save(**_profile_columns(data))
+        # Replacing or removing an uploaded résumé deletes the old PDF; external links are
+        # never touched.
+        old_key = own_resume_key(old_resume)
+        if old_key and old_resume != saved.resume_url:
+            await self._delete_object(old_key)
+        return profile_out(saved)
 
     # --- Projects ------------------------------------------------------------------------
 
@@ -251,7 +286,7 @@ class ContentService:
         old_key = project.image_key
         updated = await self.projects.update(project, **_project_columns(data))
         if old_key and old_key != updated.image_key:
-            await self._delete_image(old_key)
+            await self._delete_object(old_key)
         return admin_project_out(updated)
 
     async def delete_project(self, project_id: UUID) -> Project:
@@ -259,7 +294,7 @@ class ContentService:
         key = project.image_key
         await self.projects.delete(project)
         if key:
-            await self._delete_image(key)
+            await self._delete_object(key)
         return project
 
     async def reorder_projects(self, ids: list[UUID]) -> None:
@@ -300,10 +335,12 @@ class ContentService:
     def create_upload(self, request: UploadRequest) -> UploadOut:
         if self.storage is None:
             raise ServiceUnavailableError(
-                "Image uploads are not configured.", errors={"code": "uploads_disabled"}
+                "Uploads are not configured.", errors={"code": "uploads_disabled"}
             )
-        # The extension comes from the declared content type, never from the filename.
-        key = f"{settings.s3_upload_prefix}projects/{uuid4()}.{EXTENSIONS[request.content_type]}"
+        # The extension comes from the declared content type, never from the filename, and the
+        # folder from the purpose, so a résumé key can never pass as a project image key.
+        extensions, folder = UPLOAD_RULES[request.purpose]
+        key = f"{settings.s3_upload_prefix}{folder}{uuid4()}.{extensions[request.content_type]}"
         max_bytes = settings.s3_max_upload_mb * 1024 * 1024
         presigned = self.storage.presign_upload(key, request.content_type, max_bytes)
         return UploadOut(
@@ -335,11 +372,11 @@ class ContentService:
             )
         await repository.reorder(ids)
 
-    async def _delete_image(self, key: str) -> None:
+    async def _delete_object(self, key: str) -> None:
         if self.storage is None:
-            logger.warning("Not deleting image {}: uploads are disabled", key)
+            logger.warning("Not deleting {}: uploads are disabled", key)
             return
         try:
             await self.storage.delete(key)
         except Exception as exc:  # noqa: BLE001 -- best effort: never fail the admin's request
-            logger.warning("Could not delete image {}: {!r}", key, exc)
+            logger.warning("Could not delete {}: {!r}", key, exc)

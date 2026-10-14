@@ -17,6 +17,7 @@ from src.repositories.content_repo import (
     ProjectRepository,
     SkillGroupRepository,
 )
+from src.repositories.pitch_run_repo import PitchRunRepository
 from src.repositories.pitch_usage_repo import PitchUsageRepository
 from src.repositories.user_repo import UserRepository
 from src.services.auth_service import AuthService
@@ -25,6 +26,7 @@ from src.services.content_service import ContentService
 from src.services.context_service import ContextService
 from src.services.email_service import EmailSender, email_service
 from src.services.pitch.graph import PitchPipeline
+from src.services.pitch.history import PitchHistoryService, PitchRecorder
 from src.services.pitch.llm import create_llm
 from src.services.pitch.research import create_research
 from src.services.pitch.service import PipelineFactory, PitchService
@@ -155,13 +157,23 @@ def get_pitch_pipeline_factory() -> PipelineFactory:
     return lambda: PitchPipeline(create_llm(), create_research())
 
 
+def get_pitch_recorder(request: Request) -> PitchRecorder | None:
+    """Writes finished runs to Pitch history (created in the app lifespan)."""
+    return getattr(request.app.state, "pitch_recorder", None)
+
+
 def get_pitch_service(
     verifier: TurnstileVerifier = Depends(get_turnstile_verifier),
     usage: PitchUsageRepository = Depends(get_pitch_usage_repository),
     cache: PitchCache = Depends(get_pitch_cache),
     pipeline_factory: PipelineFactory = Depends(get_pitch_pipeline_factory),
+    recorder: PitchRecorder | None = Depends(get_pitch_recorder),
 ) -> PitchService:
-    return PitchService(verifier, usage, cache, pipeline_factory)
+    return PitchService(verifier, usage, cache, pipeline_factory, recorder=recorder)
+
+
+def get_pitch_history_service(session: AsyncSession = Depends(get_db)) -> PitchHistoryService:
+    return PitchHistoryService(PitchRunRepository(session), PitchUsageRepository(session))
 
 
 # --- Site content and admin ---

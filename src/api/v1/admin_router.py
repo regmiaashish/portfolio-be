@@ -1,11 +1,17 @@
 """Content admin (Phase 4.5): superuser-only, CSRF-guarded mutations. See ADMIN_CMS_CONTRACT.md."""
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from loguru import logger
 
-from src.core.dependencies import get_content_service, require_csrf, require_superuser
+from src.core.dependencies import (
+    get_content_service,
+    get_pitch_history_service,
+    require_csrf,
+    require_superuser,
+)
 from src.models.user_model import User
 from src.schemas.common_schema import ErrorResponse
 from src.schemas.content_schema import (
@@ -22,7 +28,15 @@ from src.schemas.content_schema import (
     UploadOut,
     UploadRequest,
 )
+from src.schemas.pitch_history_schema import (
+    PitchOutcomeName,
+    PitchRunDetail,
+    PitchRunList,
+    PitchRunSummary,
+    PitchStats,
+)
 from src.services.content_service import ContentService
+from src.services.pitch.history import PitchHistoryService, preview
 
 router = APIRouter(
     prefix="/admin",
@@ -255,5 +269,66 @@ async def create_upload(
     service: ContentService = Depends(get_content_service),
 ) -> UploadOut:
     upload = service.create_upload(payload)
-    _audit(admin, f"requested an upload URL for {upload.key} ({payload.content_type})")
+    _audit(
+        admin,
+        f"requested a {payload.purpose} upload URL for {upload.key} ({payload.content_type})",
+    )
     return upload
+
+
+# --- Pitch history ---------------------------------------------------------------------------
+# /pitches/stats is declared before /pitches/{run_id} so "stats" is never parsed as an id.
+
+
+@router.get("/pitches", response_model=PitchRunList)
+async def list_pitch_runs(
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(max_length=80)] = None,
+    outcome: PitchOutcomeName | None = None,
+    service: PitchHistoryService = Depends(get_pitch_history_service),
+) -> PitchRunList:
+    """Every Pitch Me run that started streaming, newest first."""
+    search = q.strip() if q else None
+    records, total = await service.list(
+        limit=limit, offset=offset, q=search or None, outcome=outcome
+    )
+    items = [
+        PitchRunSummary.model_validate(record).model_copy(
+            update={"preview": preview(record.pitch_text)}
+        )
+        for record in records
+    ]
+    return PitchRunList(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/pitches/stats", response_model=PitchStats)
+async def pitch_stats(
+    service: PitchHistoryService = Depends(get_pitch_history_service),
+) -> PitchStats:
+    """Today's paid runs against the daily cap, and the last 30 days' runs and spend (UTC)."""
+    return PitchStats.model_validate(await service.stats())
+
+
+@router.get("/pitches/{run_id}", response_model=PitchRunDetail, responses=_NOT_FOUND)
+async def get_pitch_run(
+    run_id: UUID,
+    service: PitchHistoryService = Depends(get_pitch_history_service),
+) -> PitchRunDetail:
+    return PitchRunDetail.model_validate(await service.get(run_id))
+
+
+@router.delete(
+    "/pitches/{run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=_NOT_FOUND,
+    **_MUTATION,
+)
+async def delete_pitch_run(
+    run_id: UUID,
+    admin: User = Depends(require_superuser),
+    service: PitchHistoryService = Depends(get_pitch_history_service),
+) -> Response:
+    record = await service.delete(run_id)
+    _audit(admin, f"deleted pitch run for {record.company} / {record.role} ({run_id})")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

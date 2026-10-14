@@ -10,6 +10,7 @@ from src.core.exceptions import DailyCapReachedError, VerificationFailedError
 from src.repositories.pitch_usage_repo import PitchUsageRepository
 from src.schemas.pitch_schema import PitchQuery
 from src.services.pitch.graph import PitchPipeline
+from src.services.pitch.history import PitchRecorder
 from src.services.pitch.stream import PitchCache, PitchRun, SSEMessage, replay
 from src.services.turnstile_service import TurnstileVerifier
 
@@ -28,12 +29,14 @@ class PitchService:
         cache: PitchCache,
         pipeline_factory: PipelineFactory,
         today: Callable[[], date] = utc_today,
+        recorder: PitchRecorder | None = None,
     ):
         self.verifier = verifier
         self.usage = usage
         self.cache = cache
         self.pipeline_factory = pipeline_factory
         self.today = today
+        self.recorder = recorder
 
     async def start(self, query: PitchQuery, client_ip: str | None) -> AsyncIterator[SSEMessage]:
         """Raises the pre-stream errors; returns the event stream once a run may go ahead."""
@@ -45,7 +48,7 @@ class PitchService:
         cached = self.cache.get(query.company, query.role)
         if cached is not None:
             logger.info("Pitch Me run outcome=ok cached=true est_cost_usd=0")
-            return replay(cached)
+            return replay(cached, query.company, query.role, self.recorder)
 
         # Counted before the run (and never refunded), so a burst can't overshoot the cap.
         runs_today = await self.usage.increment(self.today())
@@ -59,5 +62,6 @@ class PitchService:
             query.role,
             self.cache,
             settings.pitch_timeout_seconds,
+            self.recorder,
         )
         return run.stream()

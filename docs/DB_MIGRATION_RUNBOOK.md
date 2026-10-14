@@ -104,7 +104,7 @@ uv run alembic upgrade head
 ## 5. Verify
 
 ```bash
-uv run alembic current   # expect: the newest revision, e.g. 0004_site_content (head)
+uv run alembic current   # expect: the newest revision, e.g. 0005_profile_resume (head)
 uv run alembic check     # expect: No new upgrade operations detected.
 ```
 
@@ -116,7 +116,7 @@ Then run `scripts/smoke_prod.sh` after deploying; `/health/ready` should return 
 tables only; nothing existing changes). Then load today's site content once:
 
 ```bash
-uv run alembic upgrade head      # expect: 0004_site_content (head)
+uv run alembic upgrade head      # expect: 0005_profile_resume (head)
 make seed-content                # or: uv run python scripts/seed_content.py
 ```
 
@@ -129,6 +129,13 @@ shows its built-in copy of the content.
 - Undo step 4 only: `uv run alembic downgrade 0001_baseline_users` (drops the empty
   `contact_messages` table).
 - Anything else: restore from the Neon branch made in step 0.
+
+## After Phase 5: résumé link
+
+`alembic upgrade head` also applies `0005_profile_resume`, which only adds a nullable
+`site_profile.resume_url` column (no data changes; `downgrade -1` drops it again).
+It also applies `0006_pitch_runs`, a new, empty table for the admin's Pitch history (no visitor
+IPs are stored; `downgrade -1` drops it, losing only the history).
 
 ## Afterwards
 
