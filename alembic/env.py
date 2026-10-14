@@ -9,10 +9,10 @@ sys.path.insert(0, abspath(dirname(dirname(__file__))))
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import src.models  # noqa: F401 -- registers every model with Base.metadata
 from alembic import context
-from src.core.database import Base
 from src.core.config import settings
-import src.models.user_model  # noqa: F401 — registers User with Base.metadata
+from src.core.database import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -20,7 +20,10 @@ config = context.config
 
 # Override sqlalchemy.url with the value from settings so alembic.ini
 # doesn't need a hardcoded database URL.
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# "%" must be doubled for configparser interpolation (passwords may contain it).
+config.set_main_option(
+    "sqlalchemy.url", settings.database_url.get_secret_value().replace("%", "%%")
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import Response
-from jose import JWTError, jwt
 
 from src.core.config import settings
 
@@ -12,7 +12,7 @@ password_hasher = PasswordHasher()
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def hash_password(password: str) -> str:
@@ -49,7 +49,9 @@ def create_access_token(data: dict[str, Any]) -> str:
         expires_delta=timedelta(minutes=settings.jwt_access_token_expire_minutes),
         token_type="access",
     )
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        payload, settings.jwt_secret_key.get_secret_value(), algorithm=settings.jwt_algorithm
+    )
 
 
 def create_refresh_token(data: dict[str, Any]) -> str:
@@ -58,7 +60,9 @@ def create_refresh_token(data: dict[str, Any]) -> str:
         expires_delta=timedelta(days=settings.jwt_refresh_token_expire_days),
         token_type="refresh",
     )
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        payload, settings.jwt_secret_key.get_secret_value(), algorithm=settings.jwt_algorithm
+    )
 
 
 def get_access_token_expires_in() -> int:
@@ -71,8 +75,14 @@ def get_refresh_token_expires_in() -> int:
 
 def verify_token(token: str, token_type: str = "access") -> dict[str, Any] | None:
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-    except JWTError:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key.get_secret_value(),
+            # A fixed allow-list: the token's own "alg" header is never trusted (no "none").
+            algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "iat", "sub", "type"]},
+        )
+    except jwt.PyJWTError:
         return None
 
     if payload.get("type") != token_type:
@@ -82,7 +92,7 @@ def verify_token(token: str, token_type: str = "access") -> dict[str, Any] | Non
 
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    samesite = settings.cookie_samesite.lower()
+    samesite = settings.cookie_samesite
     secure_flag = True if samesite == "none" else settings.cookie_secure
 
     cookie_options = {
@@ -110,7 +120,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
 
 
 def clear_auth_cookies(response: Response) -> None:
-    samesite = settings.cookie_samesite.lower()
+    samesite = settings.cookie_samesite
     secure_flag = True if samesite == "none" else settings.cookie_secure
 
     cookie_options = {

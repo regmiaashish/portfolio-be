@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Post-deploy smoke test for Phase 0 (register lock-down).
+# Post-deploy smoke test (Phase 0 register lock-down + Phase 1 routes).
 #
 # Read-only by design. It sends:
-#   - GET /                (once; the route is rate limited to 5/minute)
-#   - GET /openapi.json    (inspects the RegisterRequest schema)
-#   - POST /auth/api/v1/register with an EMPTY body {} and NO cookies
+#   - GET /health          (liveness, no database)
+#   - GET /health/ready    (readiness: the API can reach its database)
+#   - GET /openapi.json    (inspects the RegisterRequest schema; skipped if docs are off)
+#   - POST /api/v1/auth/register with an EMPTY body {} and NO cookies
 #
 # The empty POST cannot create anything on either version:
 #   fixed version -> 401 (auth is checked before the body)
@@ -28,15 +29,17 @@ info() { printf '  INFO  %s\n' "$1"; }
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 
-echo "Phase 0 smoke test against ${BASE_URL}"
+echo "Smoke test against ${BASE_URL}"
 
-# 1. Service is up.
-echo "[1] GET /"
-status="$("${CURL[@]}" -o "$body_file" -w '%{http_code}' "${BASE_URL}/")" || status="000"
+# 1. Service is up, and can reach its database.
+echo "[1] GET /health and /health/ready"
+status="$("${CURL[@]}" -o "$body_file" -w '%{http_code}' "${BASE_URL}/health")" || status="000"
+if [ "$status" = "200" ]; then pass "GET /health returned 200"; else fail "GET /health returned ${status}"; fi
+status="$("${CURL[@]}" -o "$body_file" -w '%{http_code}' "${BASE_URL}/health/ready")" || status="000"
 case "$status" in
-  200) pass "GET / returned 200" ;;
-  429) info "GET / returned 429 (rate limited); the service is up" ;;
-  *)   fail "GET / returned ${status}" ;;
+  200) pass "GET /health/ready returned 200 (database reachable)" ;;
+  503) fail "GET /health/ready returned 503: the API cannot reach its database" ;;
+  *)   fail "GET /health/ready returned ${status}" ;;
 esac
 
 # 2. The deployed schema no longer accepts privilege fields.
@@ -71,21 +74,21 @@ else
 fi
 
 # 3. Register refuses anonymous callers. Empty body only; never a valid one.
-echo "[3] POST /auth/api/v1/register with empty body {} and no cookies"
+echo "[3] POST /api/v1/auth/register with empty body {} and no cookies"
 status="$("${CURL[@]}" -o "$body_file" -w '%{http_code}' \
-  -X POST "${BASE_URL}/auth/api/v1/register" \
+  -X POST "${BASE_URL}/api/v1/auth/register" \
   -H 'Content-Type: application/json' \
   --data '{}')" || status="000"
 case "$status" in
   401) pass "register returned 401 for an anonymous caller (fix is deployed)" ;;
   422) fail "register returned 422: body validated before auth, so the OLD unprotected version is deployed" ;;
-  404) fail "register returned 404: route moved or removed; update this script" ;;
+  404) fail "register returned 404: Phase 1 routes not deployed (old path was /auth/api/v1/register)" ;;
   *)   fail "register returned unexpected status ${status}: $(head -c 200 "$body_file")" ;;
 esac
 
 echo
 if [ "$failures" -eq 0 ]; then
-  echo "All Phase 0 smoke checks passed."
+  echo "All smoke checks passed."
 else
   echo "${failures} check(s) failed."
 fi

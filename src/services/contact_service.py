@@ -4,7 +4,6 @@ from src.templates.contact_template import contact_email_template
 
 
 class ContactService:
-
     def __init__(self):
         self.email_service = email_service
 
@@ -12,15 +11,13 @@ class ContactService:
         """
         Send a contact email using the EmailService.
         """
-        subject, html = contact_email_template.generate_email_template(name=name, email=email, message=message)
+        subject, html = contact_email_template.generate_email_template(
+            name=name, email=email, message=message
+        )
 
         self.email_service.send_email(
-                recipient=settings.super_admin_email,
-                subject=subject,
-                html=html
-            )
+            recipient=settings.super_admin_email, subject=subject, html=html
+        )
+
 
 contact_service = ContactService()
-
-
-

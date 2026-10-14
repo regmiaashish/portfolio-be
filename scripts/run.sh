@@ -1,9 +1,13 @@
 #!/bin/bash
 set -e
 
-# No need to run migrations in this script since we are not using alembic for migrations for now
-# echo "Running database migrations..."  
-# alembic upgrade head
+# Migrations run once here, before Gunicorn forks its workers, and only when asked.
+# Default off: an existing database must first be stamped onto the migration history
+# (see docs/DB_MIGRATION_RUNBOOK.md), otherwise the first migration would fail.
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+    echo "Running database migrations..."
+    alembic upgrade head
+fi
 
 echo "Starting Portfolio API..."
 
@@ -14,5 +18,6 @@ exec gunicorn src.main:app \
     --timeout "${GUNICORN_TIMEOUT:-60}" \
     --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-30}" \
     --keep-alive "${GUNICORN_KEEPALIVE:-5}" \
+    --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
     --access-logfile - \
     --error-logfile -

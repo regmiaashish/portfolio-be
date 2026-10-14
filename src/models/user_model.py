@@ -1,8 +1,10 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Boolean, func
+
+from sqlalchemy import Boolean, Column, DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
+
 from src.core.database import Base
+
 
 class User(Base):
     __tablename__ = "users"

@@ -1,64 +1,81 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from src.core.exceptions import UserNotFoundException, RepositoryError
-from src.repositories.user_repo import UserRepository
-from src.services.auth_service import AuthService
-from src.schemas.common_schema import APIResponse
-from src.schemas.auth_schema import RegisterRequest, loginRequest
-from src.core.security import set_auth_cookies
-from src.core.dependencies import get_db, get_current_user, get_current_user_from_refresh, require_superuser
-from src.core.security import clear_auth_cookies
+from fastapi import APIRouter, Depends, Request, Response, status
+
+from src.core.dependencies import (
+    get_auth_service,
+    get_current_user,
+    get_current_user_from_refresh,
+    require_superuser,
+)
+from src.core.rate_limit import LOGIN_LIMIT, limiter
+from src.core.security import clear_auth_cookies, set_auth_cookies
 from src.models.user_model import User
+from src.schemas.auth_schema import LoginRequest, RegisterRequest
+from src.schemas.common_schema import APIResponse, ErrorResponse
+from src.schemas.user_schema import UserRead
+from src.services.auth_service import AuthService, issue_tokens
 
-auth_router = APIRouter(tags=["auth"], prefix="/api/v1")
+router = APIRouter(tags=["auth"])
 
-@auth_router.post("/register", dependencies=[Depends(require_superuser)])
-async def register_user(user_create: RegisterRequest, session: AsyncSession = Depends(get_db)):
-    user_repository = UserRepository(session)
-    auth_service = AuthService(user_repository)
-
-    try:
-        user = await auth_service.register_user(user_create)
-        return APIResponse(status_code=status.HTTP_201_CREATED, content={"message": "User registered successfully."})
-    except RepositoryError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-@auth_router.post("/login")
-async def login_user(credentials: loginRequest, response: Response, session: AsyncSession = Depends(get_db)):
-    user_repository = UserRepository(session)
-    auth_service = AuthService(user_repository)
-
-    try:
-        user = await auth_service.authenticate_user(credentials.email, credentials.password)
-        tokens = auth_service.issue_tokens(user)
-        set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
-        return APIResponse(status_code=status.HTTP_200_OK, content={"message": "Login successful."})
-    except UserNotFoundException as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except RepositoryError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+_UNAUTHORIZED = {401: {"model": ErrorResponse, "description": "Not authenticated"}}
 
 
-@auth_router.get("/me")
-async def get_me(current_user: User = Depends(get_current_user)):
-    return {
-        "id": str(current_user.id),
-        "name": current_user.name,
-        "email": current_user.email,
-        "is_active": current_user.is_active,
-        "is_superuser": current_user.is_superuser,
-    }
+@router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    response_model=APIResponse,
+    # Runs before body validation, so anonymous callers get 401 whatever they send.
+    dependencies=[Depends(require_superuser)],
+    responses={
+        **_UNAUTHORIZED,
+        403: {"model": ErrorResponse, "description": "Not a superuser"},
+        409: {"model": ErrorResponse, "description": "Email already registered"},
+    },
+)
+async def register_user(
+    payload: RegisterRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+) -> APIResponse:
+    await auth_service.register_user(payload)
+    return APIResponse(message="User registered successfully.")
 
 
-@auth_router.post("/logout")
-async def logout(response: Response, _: User = Depends(get_current_user)):
-    clear_auth_cookies(response)
-    return APIResponse(status_code=status.HTTP_200_OK, content={"message": "Logged out successfully."})
-
-
-@auth_router.post("/refresh")
-async def refresh_tokens(response: Response, current_user: User = Depends(get_current_user_from_refresh)):
-    auth_service = AuthService(None)
-    tokens = auth_service.issue_tokens(current_user)
+@router.post(
+    "/login",
+    response_model=APIResponse,
+    responses={
+        **_UNAUTHORIZED,
+        429: {"model": ErrorResponse, "description": "Too many login attempts"},
+    },
+)
+@limiter.limit(LOGIN_LIMIT)
+async def login_user(
+    request: Request,
+    credentials: LoginRequest,
+    response: Response,
+    auth_service: AuthService = Depends(get_auth_service),
+) -> APIResponse:
+    user = await auth_service.authenticate_user(credentials.email, credentials.password)
+    tokens = issue_tokens(user)
     set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
-    return APIResponse(status_code=status.HTTP_200_OK, content={"message": "Tokens refreshed successfully."})
+    return APIResponse(message="Login successful.")
+
+
+@router.get("/me", response_model=APIResponse[UserRead], responses=_UNAUTHORIZED)
+async def get_me(current_user: User = Depends(get_current_user)) -> APIResponse[UserRead]:
+    return APIResponse(data=UserRead.model_validate(current_user))
+
+
+@router.post("/logout", response_model=APIResponse)
+async def logout(response: Response) -> APIResponse:
+    """Always succeeds and clears both cookies, even if they are missing or expired."""
+    clear_auth_cookies(response)
+    return APIResponse(message="Logged out successfully.")
+
+
+@router.post("/refresh", response_model=APIResponse, responses=_UNAUTHORIZED)
+async def refresh_tokens(
+    response: Response, current_user: User = Depends(get_current_user_from_refresh)
+) -> APIResponse:
+    tokens = issue_tokens(current_user)
+    set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
+    return APIResponse(message="Tokens refreshed successfully.")

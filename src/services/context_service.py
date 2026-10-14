@@ -1,19 +1,17 @@
 import asyncio
-import os
 from ipaddress import ip_address
 from urllib.parse import quote
 
 import httpx
 
+from src.core.config import settings
 from src.schemas.context_schema import VisitorContext, WeatherContext
-
 
 GEOLOCATION_URL = "https://ipapi.co/{ip}/json/"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 CURRENCY_URL = "https://api.frankfurter.app/latest"
 GEOLOCATION_FALLBACK_URL = "https://ipwho.is/{ip}"
 BASE_CURRENCY = "GBP"
-MOCK_CONTEXT_ENABLED = os.getenv("CONTEXT_MOCK", "false").lower() == "true"
 
 WEATHER_DESCRIPTIONS = {
     0: "clear skies",
@@ -63,7 +61,8 @@ async def _get_json(client: httpx.AsyncClient, url: str, **params: object) -> di
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
-        raise ValueError("The upstream service returned an invalid response.")
+        # ValueError on purpose: the router maps it to 400.
+        raise ValueError("The upstream service returned an invalid response.")  # noqa: TRY004
     return payload
 
 
@@ -108,10 +107,7 @@ async def _get_weather(
         WEATHER_URL,
         latitude=latitude,
         longitude=longitude,
-        current=(
-            "temperature_2m,apparent_temperature,precipitation,"
-            "weather_code,is_day"
-        ),
+        current=("temperature_2m,apparent_temperature,precipitation,weather_code,is_day"),
         timezone="auto",
     )
     current = payload.get("current", {})
@@ -126,9 +122,7 @@ async def _get_weather(
     )
 
 
-async def _get_conversion_rate(
-    client: httpx.AsyncClient, currency_code: str
-) -> float | None:
+async def _get_conversion_rate(client: httpx.AsyncClient, currency_code: str) -> float | None:
     if currency_code == BASE_CURRENCY:
         return 1.0
 
@@ -143,7 +137,7 @@ async def _get_conversion_rate(
 
 
 async def get_visitor_context(visitor_ip: str) -> VisitorContext:
-    if MOCK_CONTEXT_ENABLED:
+    if settings.context_mock:
         return VisitorContext(
             ip=visitor_ip,
             city="London",

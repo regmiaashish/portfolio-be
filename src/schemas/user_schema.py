@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
@@ -9,8 +10,10 @@ class UserBase(BaseModel):
     is_active: bool = True
     is_superuser: bool = False
 
+
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
+
 
 class UserUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
@@ -27,4 +30,5 @@ class UserRead(UserBase):
     is_active: bool
     is_superuser: bool
     created_at: datetime
-    updated_at: datetime
+    # NULL until the row is first updated.
+    updated_at: datetime | None = None

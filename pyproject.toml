@@ -8,20 +8,47 @@ dependencies = [
     "alembic>=1.18.5",
     "argon2-cffi>=25.1.0",
     "asyncpg>=0.31.0",
-    "boto3>=1.43.51",
+    "cachetools>=7.2.1",
     "fastapi[standard]>=0.139.2",
     "gunicorn>=26.0.0",
     "httpx>=0.28.1,<1",
+    "langchain-google-genai>=4.4.2",
+    "langgraph>=1.2.15",
     "loguru>=0.7.3",
     "pydantic-settings>=2.14.2",
-    "python-jose>=3.5.0",
+    "pyjwt>=2.15.1",
     "slowapi>=0.1.10",
     "sqlalchemy>=2.0.51",
+    "sse-starlette>=3.5.0",
+    "tavily-python>=0.8.5",
     "uvicorn>=0.51.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "respx>=0.23.1",
     "ruff>=0.17.0",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["alembic/script.py.mako"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF", "TRY", "BLE", "ASYNC"]
+# E501: line length is enforced by the formatter; long strings and HTML are left alone.
+# TRY003: short inline messages in exceptions are fine in this codebase.
+# TRY300/TRY301: try/else and raise-in-try style preferences; not worth the churn.
+ignore = ["E501", "TRY003", "TRY300", "TRY301"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Query()/Cookie() defaults are the framework idiom, not a bug.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Cookie", "fastapi.Body"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"

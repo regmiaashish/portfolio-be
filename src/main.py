@@ -1,29 +1,37 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from src.api.api_router import api_router
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.core.config import settings
 
-app = FastAPI()
-
-app.include_router(api_router)
-
-rate_limiter = Limiter(key_func=get_remote_address)  # Use remote address for rate limiting
-@app.get("/")
-@rate_limiter.limit("5/minute")  # Limit to 5 requests per minute
-async def read_root(
-    request: Request
-):
-    return {"message": "Hello from Aashish! Backend Engineer. Welcome to my FastAPI application!"}
+from src.api.api_router import api_router
+from src.core.config import Settings, settings
+from src.core.error_handlers import register_exception_handlers
+from src.core.rate_limit import limiter
 
 
-# --- Middleware ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def create_app(app_settings: Settings = settings) -> FastAPI:
+    # Interactive docs and the schema are only exposed outside production.
+    docs_enabled = not app_settings.is_prod
+
+    app = FastAPI(
+        title="Aashish Regmi Portfolio API",
+        version="1.0.0",
+        description="Backend for the portfolio: contact, visitor context and admin auth.",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
+
+    app.state.limiter = limiter
+    register_exception_handlers(app)
+    app.include_router(api_router)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=app_settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    return app
+
+
+app = create_app()
