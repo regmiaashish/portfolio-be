@@ -290,3 +290,18 @@ def test_upload_is_rate_limited(admin, storage):
 
     assert statuses[:20] == [201] * 20
     assert statuses[20] == 429
+
+
+def test_csrf_header_is_documented_for_swagger():
+    """The CSRF header appears as an input on mutating admin routes in the OpenAPI schema."""
+    from src.main import app
+
+    spec = app.openapi()
+    for path, method in (
+        ("/api/v1/admin/uploads/file", "post"),
+        ("/api/v1/admin/profile", "put"),
+        ("/api/v1/admin/projects/{project_id}", "delete"),
+    ):
+        operation = spec["paths"][path][method]
+        names = {(p["in"], p["name"]) for p in operation.get("parameters", [])}
+        assert ("header", "X-Requested-With") in names, (path, method)

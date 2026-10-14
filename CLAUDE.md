@@ -167,6 +167,12 @@ Conventions:
 - SEO: `GET /sitemap.xml` (root, `src/api/sitemap_router.py`) lists `PORTFOLIO_URL`, the
   top-level pages (`STATIC_PAGES`), `/resume` only when a résumé is set, and `/work/<slug>` for
   published projects; the frontend's `robots.txt` points to it.
+- Media via the API (Phase 6.2): `GET`/`HEAD /api/v1/media/{key}` (`media_router.py`,
+  `media_service.py`) serves uploaded files so the bucket stays private; set
+  `S3_PUBLIC_BASE_URL=<API>/api/v1/media`. Only keys matching `is_issued_key()` (the exact
+  formats in `UPLOAD_RULES`) are read; anything else, including percent-encoded paths, is 404
+  before storage is touched. Content-Type comes from the key's extension, never S3 metadata.
+  Immutable caching, ETag/304, `nosniff`, `inline`; no `X-Frame-Options` (the résumé is embedded).
 - Résumé download: `GET /api/v1/resume/download` 302s to a presigned S3 GET with an attachment
   disposition (`StorageService.presign_get`, `resume_filename()`), or to an external URL as is;
   404 `resume_unavailable` when unset; `Cache-Control: no-store`.

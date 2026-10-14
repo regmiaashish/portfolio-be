@@ -6,6 +6,7 @@ CORS needed). The presigned POST path is kept for compatibility.
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from loguru import logger
@@ -22,6 +23,15 @@ class PresignedUpload:
     fields: dict[str, str]
 
 
+@dataclass(frozen=True)
+class StoredObject:
+    body: bytes
+    content_type: str | None
+    content_length: int
+    etag: str | None
+    last_modified: datetime | None
+
+
 class StorageService(Protocol):
     def presign_upload(self, key: str, content_type: str, max_bytes: int) -> PresignedUpload: ...
 
@@ -30,6 +40,10 @@ class StorageService(Protocol):
     async def put_object(
         self, key: str, data: bytes, content_type: str, cache_control: str
     ) -> None: ...
+
+    async def get_object(self, key: str) -> StoredObject | None:
+        """The object, or None when it doesn't exist."""
+        ...
 
     async def delete(self, key: str) -> None: ...
 
@@ -93,6 +107,34 @@ class S3Storage:
             ContentType=content_type,
             CacheControl=cache_control,
         )
+
+    async def get_object(self, key: str) -> StoredObject | None:
+        # Read fully, in a worker thread: uploads are capped at S3_MAX_UPLOAD_MB, so memory is
+        # bounded; botocore's blocking stream never crosses into the event loop; the exact
+        # Content-Length is known; and Cloudflare caches the response, so origin reads are rare.
+        from botocore.exceptions import ClientError
+
+        def fetch() -> StoredObject | None:
+            try:
+                response = self.client.get_object(Bucket=self.bucket, Key=key)
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}:
+                    return None
+                raise
+            body = response["Body"]
+            try:
+                data = body.read()
+            finally:
+                body.close()
+            return StoredObject(
+                body=data,
+                content_type=response.get("ContentType"),
+                content_length=len(data),
+                etag=response.get("ETag"),
+                last_modified=response.get("LastModified"),
+            )
+
+        return await asyncio.to_thread(fetch)
 
     async def delete(self, key: str) -> None:
         # boto3 is synchronous; keep the network call off the event loop.

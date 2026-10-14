@@ -1,5 +1,6 @@
 """In-memory stand-ins for the content repositories and S3 storage (no database, no AWS)."""
 
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -7,7 +8,7 @@ from typing import Any
 from src.models.content_model import CareerEntry, Project, SiteProfile, SkillGroup
 from src.repositories.content_repo import PROFILE_ID
 from src.services.content_service import ContentService
-from src.services.storage_service import PresignedUpload
+from src.services.storage_service import PresignedUpload, StoredObject
 
 _clock = [datetime(2026, 10, 14, 12, 0, tzinfo=UTC)]
 
@@ -89,8 +90,8 @@ class FakeSkillGroupRepository(FakeOrderedRepository):
 
 
 class FakeStorage:
-    """Records presign, put and delete calls; set `fail_delete` / `put_error` to simulate S3
-    failures."""
+    """Records presign, put, get and delete calls; set `fail_delete` / `put_error` / `get_error`
+    to simulate S3 failures. Objects that were put can be read back."""
 
     def __init__(self):
         self.presigned: list[dict[str, Any]] = []
@@ -99,6 +100,9 @@ class FakeStorage:
         self.put: list[dict[str, Any]] = []
         self.fail_delete = False
         self.put_error: Exception | None = None
+        self.objects: dict[str, StoredObject] = {}
+        self.fetched: list[str] = []
+        self.get_error: Exception | None = None
 
     def presign_upload(self, key: str, content_type: str, max_bytes: int) -> PresignedUpload:
         self.presigned.append({"key": key, "content_type": content_type, "max_bytes": max_bytes})
@@ -119,6 +123,19 @@ class FakeStorage:
         self.put.append(
             {"key": key, "data": data, "content_type": content_type, "cache_control": cache_control}
         )
+        self.objects[key] = StoredObject(
+            body=data,
+            content_type=content_type,
+            content_length=len(data),
+            etag=f'"{hashlib.md5(data).hexdigest()}"',
+            last_modified=datetime(2026, 10, 14, 9, 30, tzinfo=UTC),
+        )
+
+    async def get_object(self, key: str) -> StoredObject | None:
+        self.fetched.append(key)
+        if self.get_error is not None:
+            raise self.get_error
+        return self.objects.get(key)
 
     async def delete(self, key: str) -> None:
         if self.fail_delete:

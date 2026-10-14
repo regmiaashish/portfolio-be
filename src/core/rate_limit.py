@@ -19,6 +19,8 @@ CONTENT_LIMIT = "60/minute"
 SITEMAP_LIMIT = "30/minute"
 RESUME_LIMIT = "30/minute"
 UPLOAD_FILE_LIMIT = "20/minute"
+# Public media is cached at Cloudflare's edge, so the origin sees few of these.
+MEDIA_LIMIT = "240/minute"
 # Each Pitch Me run costs money; the daily cap and Turnstile back this up.
 PITCH_LIMIT = "3/minute"
 

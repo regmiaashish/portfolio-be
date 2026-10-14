@@ -181,37 +181,36 @@ in `S3_BUCKET_NAME`:
 sits in front of the app, set `client_max_body_size 6m;` (nginx's default of 1 MB would reject
 larger files with a 413). Cloudflare's limit (100 MB on the free plan) is not an issue.
 
-**b. Public read for the upload folder only.** Either:
+**b. Keep the bucket PRIVATE: serve files through the API.** No bucket policy, no public
+access, no CloudFront. The API serves uploaded files at `GET /api/v1/media/<key>` (only keys the
+upload endpoints issue; anything else is 404), so point every public URL there in the VM's `.env`:
 
-- *Bucket policy* (Permissions → Bucket policy; Block Public Access must allow public bucket
-  policies for this bucket):
+```bash
+S3_PUBLIC_BASE_URL=https://api.aashish-regmi.com.np/api/v1/media
+```
 
-  ```json
-  {
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Sid": "PublicReadPortfolioImages",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::<S3_BUCKET_NAME>/portfolio/*"
-    }]
-  }
-  ```
+then rebuild/restart. Project image URLs are built from this at request time, so existing images
+switch over immediately. A résumé stores its full URL, so **re-upload it** in /admin → Résumé →
+Save after the change (that also lets the old-PDF cleanup recognise it).
 
-- or *CloudFront* in front of the bucket (keeps the bucket private), then set
-  `S3_PUBLIC_BASE_URL=https://<your-distribution>.cloudfront.net`.
+Cloudflare caches these responses at its edge by file extension (`.png`, `.jpg`, `.webp`, `.pdf`
+are in its default cached list) and the API sends `Cache-Control: public, max-age=31536000,
+immutable`, so repeat views rarely reach the VM. Check with
+`curl -sI <image url> | grep -i cf-cache-status` (`HIT` from the second request on).
 
-Résumé PDFs uploaded in the admin (Résumé tab) go to `portfolio/resume/`, so the same
-`portfolio/*` public-read policy (or CloudFront) covers them; nothing extra to configure.
+(Alternatives, if you ever want them: a public-read bucket policy on `portfolio/*`, or CloudFront
+in front of the bucket with `S3_PUBLIC_BASE_URL` set to the distribution. Neither is needed.)
 
 **c. Permissions of the key in `.env`.** That IAM user needs at least `s3:PutObject`,
 `s3:DeleteObject` and `s3:GetObject` on `arn:aws:s3:::<S3_BUCKET_NAME>/portfolio/*`
-(`GetObject` signs the résumé's "Download PDF" link, `GET /api/v1/resume/download`). If it currently has broad
+(`GetObject` is what `GET /api/v1/media/...` reads files with, and it signs the résumé's
+"Download PDF" link, `GET /api/v1/resume/download`). If it currently has broad
 access (e.g. full S3), consider narrowing it to that, since the key lives on an internet-facing
 server.
 
-✅ In `/admin`, upload a project image; it previews, and the public project page shows it.
+✅ In `/admin`, upload a project image; it previews, and the public project page shows it. Its URL
+starts with `https://api.aashish-regmi.com.np/api/v1/media/`, and the bucket itself still returns
+403 to the public.
 
 ## 9. Cloudflare Turnstile (bot protection)
 

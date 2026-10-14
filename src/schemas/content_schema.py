@@ -72,13 +72,26 @@ UPLOAD_RULES: dict[str, tuple[dict[str, str], str]] = {
 }
 
 
-def project_image_key_pattern() -> re.Pattern[str]:
-    """Keys /admin/uploads issues: <prefix>projects/<uuid4>.<ext>. Anything else is rejected."""
-    extensions = "|".join(EXTENSIONS.values())
+_UUID4 = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+
+def issued_key_pattern(purpose: str) -> re.Pattern[str]:
+    """Exactly the keys the upload endpoints issue for `purpose`: <prefix><folder><uuid4>.<ext>."""
+    extensions, folder = UPLOAD_RULES[purpose]
+    alternatives = "|".join(sorted(set(extensions.values())))
     return re.compile(
-        rf"^{re.escape(settings.s3_upload_prefix)}projects/"
-        rf"[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}\.({extensions})$"
+        rf"^{re.escape(settings.s3_upload_prefix)}{re.escape(folder)}{_UUID4}\.({alternatives})\Z"
     )
+
+
+def project_image_key_pattern() -> re.Pattern[str]:
+    """Keys /admin/uploads issues for project images. Anything else is rejected."""
+    return issued_key_pattern("project_image")
+
+
+def is_issued_key(key: str) -> bool:
+    """True only for keys this app issues (project images and résumés); used to serve media."""
+    return any(issued_key_pattern(purpose).match(key) for purpose in UPLOAD_RULES)
 
 
 class _Input(BaseModel):

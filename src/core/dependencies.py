@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 import httpx
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -25,6 +25,7 @@ from src.services.contact_service import ContactDelivery, ContactService, own_se
 from src.services.content_service import ContentService
 from src.services.context_service import ContextService
 from src.services.email_service import EmailSender, email_service
+from src.services.media_service import MediaService
 from src.services.pitch.graph import PitchPipeline
 from src.services.pitch.history import PitchHistoryService, PitchRecorder
 from src.services.pitch.llm import create_llm
@@ -182,12 +183,22 @@ CSRF_HEADER = "X-Requested-With"
 CSRF_HEADER_VALUE = "portfolio-admin"
 
 
-def require_csrf(request: Request) -> None:
+def require_csrf(
+    request: Request,
+    # Declared (not just read from request.headers) so it appears in the OpenAPI schema and
+    # Swagger UI shows an input for it. The check below is unchanged.
+    x_requested_with: str | None = Header(
+        default=None,
+        alias=CSRF_HEADER,
+        description=f'CSRF protection: must be "{CSRF_HEADER_VALUE}".',
+        examples=[CSRF_HEADER_VALUE],
+    ),
+) -> None:
     """Mutating admin requests must carry the custom header (forces a CORS preflight) and come
     from an allowed Origin. Together with SameSite=Lax cookies this blocks cross-site forgery."""
     origin = request.headers.get("origin")
     if (
-        request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE
+        x_requested_with != CSRF_HEADER_VALUE
         or not origin
         or origin not in settings.allowed_origins
     ):
@@ -196,6 +207,12 @@ def require_csrf(request: Request) -> None:
 
 def get_storage(request: Request) -> StorageService | None:
     return getattr(request.app.state, "storage", None)
+
+
+def get_media_service(
+    storage: StorageService | None = Depends(get_storage),
+) -> MediaService:
+    return MediaService(storage)
 
 
 def get_content_service(
