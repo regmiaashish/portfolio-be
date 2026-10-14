@@ -10,6 +10,7 @@ from src.core.config import Settings, settings
 from src.core.error_handlers import register_exception_handlers
 from src.core.rate_limit import limiter
 from src.services.context_service import ContextService
+from src.services.pitch.stream import PitchCache
 
 OUTBOUND_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with httpx.AsyncClient(timeout=OUTBOUND_TIMEOUT) as client:
         app.state.http_client = client
         app.state.context_service = ContextService(client)
+        app.state.pitch_cache = PitchCache(settings.pitch_cache_ttl_hours)
         yield
 
 
@@ -30,7 +32,9 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
     app = FastAPI(
         title="Aashish Regmi Portfolio API",
         version="1.0.0",
-        description="Backend for the portfolio: contact, visitor context and admin auth.",
+        description=(
+            "Backend for the portfolio: contact, visitor context, Pitch Me and admin auth."
+        ),
         docs_url="/docs" if docs_enabled else None,
         redoc_url="/redoc" if docs_enabled else None,
         openapi_url="/openapi.json" if docs_enabled else None,

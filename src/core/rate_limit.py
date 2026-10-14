@@ -15,6 +15,8 @@ from src.core.config import settings
 CONTACT_LIMIT = "5/minute"
 LOGIN_LIMIT = "5/minute"
 CONTEXT_LIMIT = "30/minute"
+# Each Pitch Me run costs money; the daily cap and Turnstile back this up.
+PITCH_LIMIT = "3/minute"
 
 
 def _parse_ip(value: str | None) -> str | None:

@@ -13,6 +13,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from tests import TEST_ENV
 
@@ -48,4 +50,5 @@ def test_upgrade_check_downgrade_roundtrip(tmp_path):
         result = _alembic(*step, tmp_path=tmp_path)
         assert result.returncode == 0, f"alembic {' '.join(step)} failed:\n{result.stderr}"
 
-    assert "0002_contact_messages (head)" in _alembic("current", tmp_path=tmp_path).stdout
+    head = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini"))).get_current_head()
+    assert f"{head} (head)" in _alembic("current", tmp_path=tmp_path).stdout
