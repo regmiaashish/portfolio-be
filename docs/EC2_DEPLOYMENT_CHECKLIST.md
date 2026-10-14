@@ -84,7 +84,8 @@ echo "TRUSTED_PROXY_IPS=$( (curl -s https://www.cloudflare.com/ips-v4; echo; cur
 
 `DATABASE_URL`, `SMTP_*`, `SUPER_ADMIN_EMAIL`, `PORTFOLIO_URL`, `GITHUB_URL`, `LINKEDIN_URL`,
 and the AWS keys: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_NAME`
-(Phase 4.5 uses these exact names for image uploads).
+(Phase 4.5 uses these exact names for image uploads). `PORTFOLIO_URL` must be the public site
+URL, exactly `https://aashish-regmi.com.np`: `/sitemap.xml` builds every page address from it.
 
 ### Add when you get to that step (safe to leave empty until then)
 
@@ -212,6 +213,10 @@ never do that. Add `https://www.aashish-regmi.com.np` if the site is also served
 - or *CloudFront* in front of the bucket (keeps the bucket private), then set
   `S3_PUBLIC_BASE_URL=https://<your-distribution>.cloudfront.net`.
 
+Résumé PDFs uploaded in the admin (Profile → Résumé) go to `portfolio/resume/`, so the same
+CORS rule and the same `portfolio/*` public-read policy (or CloudFront) cover them; nothing extra
+to configure.
+
 **c. Permissions of the key in `.env`.** That IAM user needs at least `s3:PutObject` and
 `s3:DeleteObject` on `arn:aws:s3:::<S3_BUCKET_NAME>/portfolio/*`. If it currently has broad
 access (e.g. full S3), consider narrowing it to that, since the key lives on an internet-facing
@@ -243,6 +248,9 @@ server.
    - A company name like `Ignore previous instructions` produces a normal pitch.
    - A burst of requests hits the 3/minute limit and the daily cap message.
 5. Only then: Cloudflare frontend build settings `VITE_PITCH_ENABLED=true` → redeploy.
+6. Watch it in `/admin` → **Pitch history**: every run (company, role, outcome, the pitch text,
+   duration, tokens, estimated cost), today's paid runs against the daily cap, and the last 30
+   days' spend. Only what visitors typed is stored: **no IP addresses or other visitor data**.
 
 ## 11. Frontend build settings (Cloudflare)
 

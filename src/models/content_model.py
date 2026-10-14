@@ -37,6 +37,8 @@ class SiteProfile(Base):
     phone_display: Mapped[str | None] = mapped_column(String(40))
     phone_href: Mapped[str | None] = mapped_column(String(60))
     socials: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, server_default="[]")
+    # Any http(s) URL, or a PDF uploaded through /admin/uploads (purpose "resume"). Phase 5.
+    resume_url: Mapped[str | None] = mapped_column(String(300))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

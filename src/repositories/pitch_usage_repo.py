@@ -1,5 +1,6 @@
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,3 +33,11 @@ class PitchUsageRepository:
         except Exception as e:
             await self.session.rollback()
             raise RepositoryError("Error recording Pitch Me usage.") from e
+
+    async def runs_on(self, day: date) -> int:
+        """Paid runs counted for `day` (0 when none). Read-only; used by the admin's stats."""
+        try:
+            runs = await self.session.scalar(select(PitchUsage.runs).where(PitchUsage.day == day))
+            return int(runs or 0)
+        except Exception as e:
+            raise RepositoryError("Error reading Pitch Me usage.") from e

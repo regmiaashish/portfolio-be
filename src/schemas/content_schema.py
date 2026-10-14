@@ -16,6 +16,7 @@ from pydantic import (
     EmailStr,
     Field,
     StringConstraints,
+    ValidationInfo,
     field_validator,
 )
 
@@ -50,12 +51,24 @@ StackItem = _text(30)
 
 SocialKind = Literal["github", "linkedin", "instagram", "x", "website"]
 ImageContentType = Literal["image/png", "image/jpeg", "image/webp", "image/avif"]
+UploadContentType = Literal[
+    "image/png", "image/jpeg", "image/webp", "image/avif", "application/pdf"
+]
+UploadPurpose = Literal["project_image", "resume"]
 
 EXTENSIONS: dict[str, str] = {
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/webp": "webp",
     "image/avif": "avif",
+}
+
+RESUME_CONTENT_TYPES: dict[str, str] = {"application/pdf": "pdf"}
+
+# What each upload purpose accepts, and the folder (under S3_UPLOAD_PREFIX) its keys live in.
+UPLOAD_RULES: dict[str, tuple[dict[str, str], str]] = {
+    "project_image": (EXTENSIONS, "projects/"),
+    "resume": (RESUME_CONTENT_TYPES, "resume/"),
 }
 
 
@@ -102,6 +115,7 @@ class ProfileInput(_Input):
     email: Annotated[EmailStr, Field(max_length=254)]
     phone: PhoneInput | None = None
     socials: Annotated[list[SocialInput], Field(max_length=8)] = []
+    resume_url: HttpUrlText | None = None
 
 
 class ImageInput(_Input):
@@ -158,9 +172,20 @@ class OrderInput(_Input):
 
 
 class UploadRequest(_Input):
+    # Declared before content_type so the content_type validator can see it.
+    purpose: UploadPurpose = "project_image"
     filename: _text(200)
-    content_type: ImageContentType
+    content_type: UploadContentType
     size: Annotated[int, Field(ge=1)]
+
+    @field_validator("content_type")
+    @classmethod
+    def type_matches_purpose(cls, value: str, info: ValidationInfo) -> str:
+        purpose = info.data.get("purpose", "project_image")
+        allowed, _folder = UPLOAD_RULES[purpose]
+        if value not in allowed:
+            raise ValueError(f"must be one of {', '.join(allowed)} for purpose {purpose}")
+        return value
 
     @field_validator("size")
     @classmethod
@@ -194,6 +219,7 @@ class ProfileOut(BaseModel):
     email: str
     phone: PhoneOut | None
     socials: list[SocialOut]
+    resume_url: str | None
 
 
 class ImageOut(BaseModel):

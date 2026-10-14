@@ -132,3 +132,53 @@ uploads disabled). New: `S3_PUBLIC_BASE_URL` (optional; CloudFront or custom dom
   then show login.
 - Public pages read content through one `ContentProvider` (`GET /api/v1/content`), falling back to
   the bundled snapshot (`src/data/*`), so the site always renders.
+
+## Phase 5 additions
+
+**Résumé.** `profile` gains `resume_url: string | null` (`https://` or `http://`, ≤ 300) in the
+public and admin shapes and in `PUT /admin/profile`. Migration `0005_profile_resume` adds the
+nullable column. The admin can paste any URL or upload a PDF:
+
+- `POST /admin/uploads` gains an optional `purpose`: `"project_image"` (default, unchanged
+  behaviour) or `"resume"`. For `"resume"`: `content_type` must be `application/pdf`, size ≤
+  `S3_MAX_UPLOAD_MB`, key `<S3_UPLOAD_PREFIX>resume/<uuid4>.pdf`, same response shape.
+- When `resume_url` changes and the old value pointed at our own upload prefix
+  (`<public base>/<prefix>resume/…`), the old object is deleted best-effort.
+
+**Sitemap.** `GET /sitemap.xml` (API root, not under `/api/v1`, no auth, `Cache-Control: public,
+max-age=3600`) returns a standard `urlset` with `PORTFOLIO_URL` + `/` and `PORTFOLIO_URL` +
+`/work/<slug>` for every **published** project (`lastmod` from `updated_at`, date only). The
+frontend's `robots.txt` points to it (cross-host sitemaps listed in robots.txt are accepted by
+search engines). If there is no content yet, it lists only the home page.
+
+**Image optimisation (frontend only).** Before uploading a project image, the admin downscales it
+in the browser to at most 1600 px wide and re-encodes it as WebP (quality ~0.85) when that is
+smaller; the presign request then uses `image/webp` and the new size/dimensions.
+
+## Pitch history (admin)
+
+Every Pitch Me run that **started streaming** is recorded when it ends (including cached replays
+and runs the visitor abandoned). Runs refused before streaming (switched off, validation,
+Turnstile, rate limit, daily cap) are not recorded. **No IP address or other visitor data is
+stored**, only what the visitor typed and what the pipeline produced.
+
+**Model `pitch_runs` (migration `0006_pitch_runs`):** `id` (UUID), `company` (≤ 80), `role`
+(≤ 80), `outcome` (`completed` | `cached` | `timeout` | `upstream_error` | `internal_error` |
+`disconnected`, check constraint), `pitch_text` (text, nullable: full text when completed or
+cached, whatever was streamed so far otherwise), `error_code` (nullable), `duration_ms` (int),
+`input_tokens`, `output_tokens` (nullable ints), `searches` (int, default 0),
+`estimated_cost_usd` (numeric(10,6), nullable), `created_at` (indexed). Recording happens in its
+own DB session after the stream ends and must never break or delay the stream; failures are
+logged.
+
+**Endpoints** (superuser; `DELETE` also needs the CSRF header and allowed Origin):
+
+| Method & path | Result |
+|---|---|
+| `GET /admin/pitches?limit=20&offset=0&q=&outcome=` | 200 `{"items": [PitchRunSummary], "total": n, "limit": 20, "offset": 0}`, newest first. `limit` 1–100; `q` (≤ 80) matches company or role case-insensitively; `outcome` optional filter |
+| `GET /admin/pitches/stats` | 200 `{"enabled": bool, "daily_cap": n, "today": {"paid_runs": n, "cached": n, "failed": n}, "last_30_days": {"runs": n, "cached": n, "failed": n, "estimated_cost_usd": x}}` (`paid_runs` from `pitch_usage`; `failed` = timeout + upstream_error + internal_error; days in UTC) |
+| `GET /admin/pitches/{id}` | 200 PitchRunDetail (every column) or 404 |
+| `DELETE /admin/pitches/{id}` | 204 or 404 |
+
+`PitchRunSummary`: `id, company, role, outcome, duration_ms, estimated_cost_usd, created_at,
+preview` (first 160 characters of `pitch_text`, or null).
