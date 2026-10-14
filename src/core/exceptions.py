@@ -155,3 +155,17 @@ class ServiceUnavailableError(AppException):
             status_code=503,
             errors=errors,
         )
+
+
+class PitchDisabledError(AppException):
+    """Raised when Pitch Me is switched off (PITCH_ENABLED=false)."""
+
+    def __init__(self, message: str = "Pitch Me is switched off right now."):
+        super().__init__(message=message, status_code=503, errors={"code": "disabled"})
+
+
+class DailyCapReachedError(AppException):
+    """Raised when today's Pitch Me budget (PITCH_DAILY_CAP) is used up."""
+
+    def __init__(self, message: str = "The demo is resting for today. Try again tomorrow."):
+        super().__init__(message=message, status_code=429, errors={"code": "daily_cap"})

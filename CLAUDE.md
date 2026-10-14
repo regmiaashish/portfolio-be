@@ -26,8 +26,8 @@ values as environment variables (see `tests/__init__.py` for a complete dummy se
 - Auth: argon2 password hashing, HS256 JWTs (PyJWT) in HttpOnly cookies
 - slowapi rate limiting, loguru logging, httpx for outbound HTTP
 - Gunicorn + Uvicorn workers in a Docker image (`Dockerfile`, `scripts/run.sh`)
-- Installed for Phase 4 (Pitch Me), not yet imported: langgraph, langchain-google-genai,
-  tavily-python, sse-starlette, cachetools
+- Pitch Me: LangGraph pipeline, Gemini via langchain-google-genai, Tavily search, SSE via
+  sse-starlette; cachetools for in-process caches
 - Tooling: ruff (lint + format, config in `pyproject.toml`), pytest, pytest-asyncio, respx
 
 ## Configuration
@@ -117,6 +117,23 @@ Conventions:
   Blocking SMTP runs via `asyncio.to_thread`.
 - Contact spam controls: honeypot (`website`), Turnstile when `TURNSTILE_SECRET` is set, and
   confirmation emails only when Turnstile is on.
+
+## Pitch Me (paid pipeline)
+
+- `src/services/pitch/`: `graph.py` (researcher -> matchmaker -> writer, progress via
+  LangGraph's custom stream writer), `llm.py` and `research.py` (providers, chosen **only** in
+  `create_llm()` / `create_research()`), `prompts.py`, `stream.py` (SSE run, cache, cost log),
+  `service.py` (pre-stream checks). Route: `src/api/v1/pitch_router.py`.
+- Every run costs money. Keep these in front of the pipeline: kill switch (`PITCH_ENABLED`),
+  3/minute limit, Turnstile, cache (hits are free), then the Postgres daily cap
+  (`pitch_usage`, atomic upsert, counted before the run and never refunded).
+- Visitor input and scraped text go into prompts only inside `<company>`, `<role>`,
+  `<research>` tags, with `UNTRUSTED_RULE` in the system prompt; scraped `<`/`>` are escaped.
+- The pipeline runs in its own task behind a queue: the deadline (`PITCH_TIMEOUT_SECONDS`) and
+  client disconnects cancel it so no further paid calls are made.
+- Tests and local dev use `PITCH_LLM_PROVIDER=fake` / `PITCH_RESEARCH_PROVIDER=fake`; the prod
+  settings validator refuses fakes and missing keys when `PITCH_ENABLED=true`. Never call real
+  providers from tests or scripts.
 
 ## Testing
 

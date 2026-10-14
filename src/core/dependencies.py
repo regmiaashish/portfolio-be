@@ -7,14 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
+from src.core.exceptions import PitchDisabledError
 from src.core.security import verify_token
 from src.models.user_model import User
 from src.repositories.contact_message_repo import ContactMessageRepository
+from src.repositories.pitch_usage_repo import PitchUsageRepository
 from src.repositories.user_repo import UserRepository
 from src.services.auth_service import AuthService
 from src.services.contact_service import ContactDelivery, ContactService, own_session_repository
 from src.services.context_service import ContextService
 from src.services.email_service import EmailSender, email_service
+from src.services.pitch.graph import PitchPipeline
+from src.services.pitch.llm import create_llm
+from src.services.pitch.research import create_research
+from src.services.pitch.service import PipelineFactory, PitchService
+from src.services.pitch.stream import PitchCache
 from src.services.turnstile_service import TurnstileVerifier
 
 
@@ -116,3 +123,34 @@ def get_contact_service(
 
 def get_contact_delivery(sender: EmailSender = Depends(get_email_sender)) -> ContactDelivery:
     return ContactDelivery(sender, own_session_repository)
+
+
+# --- Pitch Me ---
+
+
+def ensure_pitch_enabled() -> None:
+    """Kill switch. Runs before input validation, so a switched-off demo always says so."""
+    if not settings.pitch_enabled:
+        raise PitchDisabledError()
+
+
+def get_pitch_cache(request: Request) -> PitchCache:
+    return request.app.state.pitch_cache
+
+
+def get_pitch_usage_repository(session: AsyncSession = Depends(get_db)) -> PitchUsageRepository:
+    return PitchUsageRepository(session)
+
+
+def get_pitch_pipeline_factory() -> PipelineFactory:
+    # A fresh LLM/research client per run, so token usage and search counts are per run.
+    return lambda: PitchPipeline(create_llm(), create_research())
+
+
+def get_pitch_service(
+    verifier: TurnstileVerifier = Depends(get_turnstile_verifier),
+    usage: PitchUsageRepository = Depends(get_pitch_usage_repository),
+    cache: PitchCache = Depends(get_pitch_cache),
+    pipeline_factory: PipelineFactory = Depends(get_pitch_pipeline_factory),
+) -> PitchService:
+    return PitchService(verifier, usage, cache, pipeline_factory)

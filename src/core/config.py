@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     turnstile_secret: SecretStr = SecretStr("")
     pitch_enabled: bool = False
     pitch_daily_cap: int = Field(default=100, ge=0)
+    # Which LLM writes the pitch. "fake" is deterministic and free (tests, local dev).
+    pitch_llm_provider: Literal["gemini", "fake"] = "gemini"
+    pitch_llm_model: str = "gemini-2.5-flash"
+    # Which web search backs the researcher agent. "fake" returns canned results.
+    pitch_research_provider: Literal["tavily", "fake"] = "tavily"
+    # Identical (company, role) requests replay from memory for this long (per process).
+    pitch_cache_ttl_hours: int = Field(default=24, ge=0)
+    # Hard ceiling on one run, end to end.
+    pitch_timeout_seconds: float = Field(default=45, gt=0)
 
     @property
     def is_prod(self) -> bool:
@@ -128,7 +137,27 @@ class Settings(BaseSettings):
                 f"JWT_SECRET_KEY must be at least {MIN_PROD_JWT_SECRET_LENGTH} characters when "
                 'ENV=prod. Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
             )
+        if self.is_prod and self.pitch_enabled:
+            self._check_pitch_ready()
         return self
+
+    def _check_pitch_ready(self) -> None:
+        """Pitch Me spends money on every run: refuse to enable it half-configured in prod."""
+        problems = []
+        if not self.turnstile_secret.get_secret_value():
+            problems.append("TURNSTILE_SECRET is required (bot protection)")
+        if self.pitch_llm_provider == "fake" or self.pitch_research_provider == "fake":
+            problems.append("PITCH_LLM_PROVIDER and PITCH_RESEARCH_PROVIDER cannot be fake")
+        if self.pitch_llm_provider == "gemini" and not self.gemini_api_key.get_secret_value():
+            problems.append("GEMINI_API_KEY is required for PITCH_LLM_PROVIDER=gemini")
+        if self.pitch_research_provider == "tavily" and not self.tavily_api_key.get_secret_value():
+            problems.append("TAVILY_API_KEY is required for PITCH_RESEARCH_PROVIDER=tavily")
+        if problems:
+            raise ValueError(
+                "PITCH_ENABLED=true with ENV=prod, but Pitch Me is not safe to run: "
+                + "; ".join(problems)
+                + ". Fix these or set PITCH_ENABLED=false."
+            )
 
 
 settings = Settings()
