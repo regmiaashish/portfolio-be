@@ -174,8 +174,12 @@ class DailyCapReachedError(AppException):
 class NotFoundError(AppException):
     """Raised when a requested resource does not exist."""
 
-    def __init__(self, message: str = "Not found."):
-        super().__init__(message=message, status_code=404)
+    def __init__(
+        self,
+        message: str = "Not found.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(message=message, status_code=404, errors=errors)
 
 
 class UnprocessableError(AppException):

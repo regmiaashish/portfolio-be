@@ -18,6 +18,15 @@ from src.services.content_service import ContentService
 SITEMAP_NAMESPACE = "http://www.sitemaps.org/schemas/sitemap/0.9"
 CACHE_CONTROL = "public, max-age=3600"
 
+# The frontend's top-level pages (Phase 6). Pages whose text comes from the admin content share
+# its last-modified date; /pitch is an interactive demo with no content date.
+STATIC_PAGES: tuple[tuple[str, bool], ...] = (
+    ("work", True),
+    ("pitch", False),
+    ("about", True),
+    ("contact", True),
+)
+
 router = APIRouter(tags=["seo"])
 
 
@@ -30,7 +39,10 @@ def _lastmod(stamp: datetime | None) -> str | None:
 
 
 def build_sitemap(
-    base_url: str, home_lastmod: datetime | None, projects: list[tuple[str, datetime | None]]
+    base_url: str,
+    home_lastmod: datetime | None,
+    projects: list[tuple[str, datetime | None]],
+    include_resume: bool = False,
 ) -> bytes:
     base = base_url.rstrip("/")
     urlset = ElementTree.Element("urlset", xmlns=SITEMAP_NAMESPACE)
@@ -42,6 +54,10 @@ def build_sitemap(
             ElementTree.SubElement(url, "lastmod").text = lastmod
 
     add(f"{base}/", home_lastmod)
+    for path, uses_content_date in STATIC_PAGES:
+        add(f"{base}/{path}", home_lastmod if uses_content_date else None)
+    if include_resume:
+        add(f"{base}/resume", home_lastmod)
     for slug, stamp in projects:
         add(f"{base}/work/{quote(slug, safe='')}", stamp)
 
@@ -59,9 +75,10 @@ def build_sitemap(
 async def sitemap(
     request: Request, service: ContentService = Depends(get_content_service)
 ) -> XMLResponse:
-    """Home page plus one URL per published project, with lastmod dates."""
+    """Home, the top-level pages, /resume when a résumé is set, and every published project."""
     home, projects = await service.sitemap_entries()
+    include_resume = await service.has_resume()
     return XMLResponse(
-        content=build_sitemap(settings.portfolio_url, home, projects),
+        content=build_sitemap(settings.portfolio_url, home, projects, include_resume),
         headers={"Cache-Control": CACHE_CONTROL},
     )

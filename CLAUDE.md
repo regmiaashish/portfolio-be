@@ -161,8 +161,12 @@ Conventions:
   `projects/` folder) or `resume` (PDF, `resume/` folder). A key from one folder is never valid
   for the other. Replacing the profile's `resume_url` deletes the old PDF only when it lives under
   our own `<public base>/<prefix>resume/`; external links are never touched.
-- SEO: `GET /sitemap.xml` (root, `src/api/sitemap_router.py`) lists `PORTFOLIO_URL` plus
-  `/work/<slug>` for published projects; the frontend's `robots.txt` points to it.
+- SEO: `GET /sitemap.xml` (root, `src/api/sitemap_router.py`) lists `PORTFOLIO_URL`, the
+  top-level pages (`STATIC_PAGES`), `/resume` only when a résumé is set, and `/work/<slug>` for
+  published projects; the frontend's `robots.txt` points to it.
+- Résumé download: `GET /api/v1/resume/download` 302s to a presigned S3 GET with an attachment
+  disposition (`StorageService.presign_get`, `resume_filename()`), or to an external URL as is;
+  404 `resume_unavailable` when unset; `Cache-Control: no-store`.
 
 ## Testing
 

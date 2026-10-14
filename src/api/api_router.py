@@ -8,6 +8,7 @@ from src.api.v1.contact_router import router as contact_router
 from src.api.v1.content_router import router as content_router
 from src.api.v1.context_router import router as context_router
 from src.api.v1.pitch_router import router as pitch_router
+from src.api.v1.resume_router import router as resume_router
 from src.schemas.common_schema import ErrorResponse
 
 # Documents the real error shape; this also replaces FastAPI's default 422 schema,
@@ -22,6 +23,7 @@ v1_router.include_router(contact_router)
 v1_router.include_router(context_router)
 v1_router.include_router(pitch_router)
 v1_router.include_router(content_router)
+v1_router.include_router(resume_router)
 v1_router.include_router(admin_router)
 v1_router.include_router(auth_router, prefix="/auth")
 

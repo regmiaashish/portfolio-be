@@ -217,8 +217,9 @@ Résumé PDFs uploaded in the admin (Profile → Résumé) go to `portfolio/resu
 CORS rule and the same `portfolio/*` public-read policy (or CloudFront) cover them; nothing extra
 to configure.
 
-**c. Permissions of the key in `.env`.** That IAM user needs at least `s3:PutObject` and
-`s3:DeleteObject` on `arn:aws:s3:::<S3_BUCKET_NAME>/portfolio/*`. If it currently has broad
+**c. Permissions of the key in `.env`.** That IAM user needs at least `s3:PutObject`,
+`s3:DeleteObject` and `s3:GetObject` on `arn:aws:s3:::<S3_BUCKET_NAME>/portfolio/*`
+(`GetObject` signs the résumé's "Download PDF" link, `GET /api/v1/resume/download`). If it currently has broad
 access (e.g. full S3), consider narrowing it to that, since the key lives on an internet-facing
 server.
 
