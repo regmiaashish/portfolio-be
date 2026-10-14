@@ -1,3 +1,7 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,6 +9,18 @@ from src.api.api_router import api_router
 from src.core.config import Settings, settings
 from src.core.error_handlers import register_exception_handlers
 from src.core.rate_limit import limiter
+from src.services.context_service import ContextService
+
+OUTBOUND_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # One pooled HTTP client for every outbound call (geo, weather, FX, Turnstile).
+    async with httpx.AsyncClient(timeout=OUTBOUND_TIMEOUT) as client:
+        app.state.http_client = client
+        app.state.context_service = ContextService(client)
+        yield
 
 
 def create_app(app_settings: Settings = settings) -> FastAPI:
@@ -18,6 +34,7 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         docs_url="/docs" if docs_enabled else None,
         redoc_url="/redoc" if docs_enabled else None,
         openapi_url="/openapi.json" if docs_enabled else None,
+        lifespan=lifespan,
     )
 
     app.state.limiter = limiter

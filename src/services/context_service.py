@@ -1,17 +1,39 @@
+"""Visitor context for the hero greeting: where they are, their weather, currency and
+how much our working days overlap.
+
+Geolocation runs first; weather and FX then run concurrently. Weather and FX are
+optional: if either fails the response still succeeds with those fields null. Only a
+geolocation failure makes the whole lookup fail.
+"""
+
 import asyncio
-from ipaddress import ip_address
+import math
+from collections.abc import Callable
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
+from cachetools import TTLCache
+from loguru import logger
 
 from src.core.config import settings
+from src.core.exceptions import ServiceUnavailableError
 from src.schemas.context_schema import VisitorContext, WeatherContext
 
 GEOLOCATION_URL = "https://ipapi.co/{ip}/json/"
+GEOLOCATION_FALLBACK_URL = "https://ipwho.is/{ip}"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 CURRENCY_URL = "https://api.frankfurter.app/latest"
-GEOLOCATION_FALLBACK_URL = "https://ipwho.is/{ip}"
+
 BASE_CURRENCY = "GBP"
+MY_TIMEZONE = "Asia/Kathmandu"
+WORKDAY_START = time(9)
+WORKDAY_END = time(18)
+
+GEO_CACHE_TTL_SECONDS = 30 * 60
+FX_CACHE_TTL_SECONDS = 6 * 60 * 60
 
 WEATHER_DESCRIPTIONS = {
     0: "clear skies",
@@ -48,145 +70,260 @@ CURRENCY_SYMBOLS = {
     "AUD": "A$",
 }
 
+CONTEXT_UNAVAILABLE = "Visitor context is temporarily unavailable."
 
-def validate_ip(value: str) -> str:
+
+class GeolocationError(Exception):
+    """Neither geolocation provider could place the IP."""
+
+
+# --- Pure helpers (no I/O) -----------------------------------------------------------
+
+
+def _zone(name: str | None) -> ZoneInfo | None:
+    if not name:
+        return None
     try:
-        return str(ip_address(value.strip()))
-    except ValueError as exc:
-        raise ValueError("A valid IPv4 or IPv6 address is required.") from exc
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
 
 
-async def _get_json(client: httpx.AsyncClient, url: str, **params: object) -> dict:
-    response = await client.get(url, params=params or None)
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        # ValueError on purpose: the router maps it to 400.
-        raise ValueError("The upstream service returned an invalid response.")  # noqa: TRY004
-    return payload
-
-
-async def _get_geolocation(client: httpx.AsyncClient, normalized_ip: str) -> dict:
-    encoded_ip = quote(normalized_ip, safe="")
-    try:
-        geo = await _get_json(
-            client,
-            GEOLOCATION_URL.format(ip=encoded_ip),
-        )
-        if not geo.get("error"):
-            return geo
-    except httpx.HTTPStatusError:
-        # ipapi.co can rate-limit shared development IPs. Try the fallback below.
-        pass
-
-    fallback = await _get_json(
-        client,
-        GEOLOCATION_FALLBACK_URL.format(ip=encoded_ip),
-    )
-    if fallback.get("success") is False:
-        raise ValueError(fallback.get("message", "Unable to locate the visitor."))
-
-    timezone = fallback.get("timezone") or {}
-    currency = fallback.get("currency") or {}
-    return {
-        "city": fallback.get("city"),
-        "country_name": fallback.get("country"),
-        "country_code": fallback.get("country_code"),
-        "timezone": timezone.get("id"),
-        "currency": currency.get("code"),
-        "latitude": fallback.get("latitude"),
-        "longitude": fallback.get("longitude"),
-    }
-
-
-async def _get_weather(
-    client: httpx.AsyncClient, latitude: float, longitude: float
-) -> WeatherContext:
-    payload = await _get_json(
-        client,
-        WEATHER_URL,
-        latitude=latitude,
-        longitude=longitude,
-        current=("temperature_2m,apparent_temperature,precipitation,weather_code,is_day"),
-        timezone="auto",
-    )
-    current = payload.get("current", {})
-    weather_code = current.get("weather_code")
-    return WeatherContext(
-        temperature_c=current.get("temperature_2m"),
-        apparent_temperature_c=current.get("apparent_temperature"),
-        precipitation_mm=current.get("precipitation"),
-        weather_code=weather_code,
-        description=WEATHER_DESCRIPTIONS.get(weather_code, "unknown conditions"),
-        is_day=bool(current["is_day"]) if "is_day" in current else None,
+def _workday(day: date, zone: ZoneInfo) -> tuple[datetime, datetime]:
+    return (
+        datetime.combine(day, WORKDAY_START, tzinfo=zone),
+        datetime.combine(day, WORKDAY_END, tzinfo=zone),
     )
 
 
-async def _get_conversion_rate(client: httpx.AsyncClient, currency_code: str) -> float | None:
-    if currency_code == BASE_CURRENCY:
-        return 1.0
-
-    payload = await _get_json(
-        client,
-        CURRENCY_URL,
-        **{"from": BASE_CURRENCY},
-        to=currency_code,
-    )
-    rate = payload.get("rates", {}).get(currency_code)
-    return float(rate) if rate is not None else None
+def round_half_up_to_half(hours: float) -> float:
+    """4.25 -> 4.5, 3.24 -> 3.0. Python's round() would send 4.25 to 4.0 (banker's rounding)."""
+    return math.floor(hours * 2 + 0.5) / 2
 
 
-async def get_visitor_context(visitor_ip: str) -> VisitorContext:
-    if settings.context_mock:
-        return VisitorContext(
-            ip=visitor_ip,
-            city="London",
-            country="United Kingdom",
-            country_code="GB",
-            timezone="Europe/London",
-            currency_code="GBP",
-            currency_symbol="£",
-            base_currency=BASE_CURRENCY,
-            conversion_rate=1.0,
-            weather=WeatherContext(
-                temperature_c=18.0,
-                apparent_temperature_c=18.0,
-                precipitation_mm=0.2,
-                weather_code=61,
-                description="light rain",
-                is_day=True,
-            ),
-        )
+def working_overlap_hours(
+    visitor_timezone: str, now: datetime, my_timezone: str = MY_TIMEZONE
+) -> float | None:
+    """Hours the visitor's 09:00-18:00 today overlaps my 09:00-18:00 working days.
 
-    normalized_ip = validate_ip(visitor_ip)
-    timeout = httpx.Timeout(6.0, connect=3.0)
+    My adjacent days count too: across the date line the visitor's afternoon can be my
+    next morning. Uses real tz rules, so DST and Nepal's UTC+5:45 are handled. Rounded to
+    the nearest half hour (halves round up), never negative.
+    """
+    visitor_zone, my_zone = _zone(visitor_timezone), _zone(my_timezone)
+    if visitor_zone is None or my_zone is None:
+        return None
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        geo = await _get_geolocation(client, normalized_ip)
+    visitor_start, visitor_end = _workday(now.astimezone(visitor_zone).date(), visitor_zone)
+    my_today = now.astimezone(my_zone).date()
 
-        if geo.get("error"):
-            raise ValueError(geo.get("reason", "Unable to locate the visitor."))
+    overlap = timedelta()
+    for offset in (-1, 0, 1):
+        my_start, my_end = _workday(my_today + timedelta(days=offset), my_zone)
+        start, end = max(visitor_start, my_start), min(visitor_end, my_end)
+        if end > start:
+            overlap += end - start
+    return max(0.0, round_half_up_to_half(overlap.total_seconds() / 3600))
 
-        latitude = geo.get("latitude")
-        longitude = geo.get("longitude")
+
+def _local_time(zone: ZoneInfo | None, now: datetime) -> tuple[str | None, int | None]:
+    if zone is None:
+        return None, None
+    local = now.astimezone(zone)
+    offset = local.utcoffset() or timedelta()
+    return local.isoformat(timespec="seconds"), int(offset.total_seconds() // 60)
+
+
+def _hourly_rates(conversion_rate: float | None) -> tuple[float | None, float | None]:
+    rate_gbp = float(settings.hourly_rate_gbp) if settings.hourly_rate_gbp is not None else None
+    if rate_gbp is None or conversion_rate is None:
+        return rate_gbp, None
+    return rate_gbp, round(rate_gbp * conversion_rate, 2)
+
+
+# --- Service --------------------------------------------------------------------------
+
+
+class ContextService:
+    """Looks up visitor context through a shared HTTP client, with in-memory TTL caches.
+
+    The caches are only touched between awaits on a single event loop, so they need no
+    lock. Failures are never cached.
+    """
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        geo_ttl: float = GEO_CACHE_TTL_SECONDS,
+        fx_ttl: float = FX_CACHE_TTL_SECONDS,
+    ):
+        self.client = client
+        self.clock = clock
+        self._geo_cache: TTLCache[str, dict[str, Any]] = TTLCache(maxsize=2048, ttl=geo_ttl)
+        self._weather_cache: TTLCache[str, WeatherContext] = TTLCache(maxsize=2048, ttl=geo_ttl)
+        self._fx_cache: TTLCache[str, float] = TTLCache(maxsize=256, ttl=fx_ttl)
+
+    async def get_context(self, ip: str) -> VisitorContext:
+        if settings.context_mock:
+            return self._mock_context()
+
+        try:
+            geo = await self._geolocation(ip)
+        except (GeolocationError, httpx.HTTPError, ValueError) as exc:
+            logger.warning("Geolocation failed for {}: {!r}", ip, exc)
+            raise ServiceUnavailableError(CONTEXT_UNAVAILABLE) from exc
+
         currency_code = geo.get("currency") or BASE_CURRENCY
-        if latitude is None or longitude is None:
-            raise ValueError("The geolocation service did not return coordinates.")
-
         weather, conversion_rate = await asyncio.gather(
-            _get_weather(client, float(latitude), float(longitude)),
-            _get_conversion_rate(client, currency_code),
+            self._weather_or_none(ip, geo), self._conversion_or_none(currency_code)
+        )
+        return self._build(geo, weather, currency_code, conversion_rate)
+
+    # -- providers --
+
+    async def _get_json(self, url: str, **params: object) -> dict[str, Any]:
+        response = await self.client.get(url, params=params or None)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("The upstream service returned an invalid response.")  # noqa: TRY004
+        return payload
+
+    async def _geolocation(self, ip: str) -> dict[str, Any]:
+        if ip in self._geo_cache:
+            return self._geo_cache[ip]
+
+        encoded = quote(ip, safe="")
+        geo: dict[str, Any] | None = None
+        try:
+            primary = await self._get_json(GEOLOCATION_URL.format(ip=encoded))
+            if not primary.get("error"):
+                geo = {
+                    "city": primary.get("city"),
+                    "country": primary.get("country_name"),
+                    "country_code": primary.get("country_code"),
+                    "timezone": primary.get("timezone"),
+                    "currency": primary.get("currency"),
+                    "latitude": primary.get("latitude"),
+                    "longitude": primary.get("longitude"),
+                }
+        except (httpx.HTTPError, ValueError) as exc:
+            # ipapi.co rate-limits shared IPs aggressively; the fallback usually works.
+            logger.info("Primary geolocation failed for {}: {!r}", ip, exc)
+
+        if geo is None:
+            fallback = await self._get_json(GEOLOCATION_FALLBACK_URL.format(ip=encoded))
+            if fallback.get("success") is False:
+                raise GeolocationError(fallback.get("message", "Unable to locate the visitor."))
+            geo = {
+                "city": fallback.get("city"),
+                "country": fallback.get("country"),
+                "country_code": fallback.get("country_code"),
+                "timezone": (fallback.get("timezone") or {}).get("id"),
+                "currency": (fallback.get("currency") or {}).get("code"),
+                "latitude": fallback.get("latitude"),
+                "longitude": fallback.get("longitude"),
+            }
+
+        self._geo_cache[ip] = geo
+        return geo
+
+    async def _weather_or_none(self, ip: str, geo: dict[str, Any]) -> WeatherContext | None:
+        if ip in self._weather_cache:
+            return self._weather_cache[ip]
+        latitude, longitude = geo.get("latitude"), geo.get("longitude")
+        if latitude is None or longitude is None:
+            return None
+        try:
+            payload = await self._get_json(
+                WEATHER_URL,
+                latitude=float(latitude),
+                longitude=float(longitude),
+                current="temperature_2m,apparent_temperature,precipitation,weather_code,is_day",
+                timezone="auto",
+            )
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Weather lookup failed for {}: {!r}", ip, exc)
+            return None
+
+        current = payload.get("current") or {}
+        code = current.get("weather_code")
+        weather = WeatherContext(
+            temperature_c=current.get("temperature_2m"),
+            apparent_temperature_c=current.get("apparent_temperature"),
+            precipitation_mm=current.get("precipitation"),
+            weather_code=code,
+            description=WEATHER_DESCRIPTIONS.get(code, "unknown conditions"),
+            is_day=bool(current["is_day"]) if "is_day" in current else None,
+        )
+        self._weather_cache[ip] = weather
+        return weather
+
+    async def _conversion_or_none(self, currency_code: str) -> float | None:
+        if currency_code == BASE_CURRENCY:
+            return 1.0
+        if currency_code in self._fx_cache:
+            return self._fx_cache[currency_code]
+        try:
+            payload = await self._get_json(
+                CURRENCY_URL, **{"from": BASE_CURRENCY}, to=currency_code
+            )
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("FX lookup failed for {}: {!r}", currency_code, exc)
+            return None
+        rate = (payload.get("rates") or {}).get(currency_code)
+        if rate is None:
+            return None
+        self._fx_cache[currency_code] = float(rate)
+        return float(rate)
+
+    # -- assembly --
+
+    def _build(
+        self,
+        geo: dict[str, Any],
+        weather: WeatherContext | None,
+        currency_code: str,
+        conversion_rate: float | None,
+    ) -> VisitorContext:
+        now = self.clock()
+        timezone = geo.get("timezone")
+        zone = _zone(timezone)
+        local_time, utc_offset = _local_time(zone, now)
+        my_local_time, _ = _local_time(_zone(MY_TIMEZONE), now)
+        rate_gbp, rate_local = _hourly_rates(conversion_rate)
+        return VisitorContext(
+            city=geo.get("city"),
+            country=geo.get("country"),
+            country_code=geo.get("country_code"),
+            timezone=timezone if zone else None,
+            local_time=local_time,
+            utc_offset_minutes=utc_offset,
+            weather=weather,
+            currency_code=currency_code,
+            currency_symbol=CURRENCY_SYMBOLS.get(currency_code, currency_code),
+            conversion_rate=conversion_rate,
+            hourly_rate_gbp=rate_gbp,
+            hourly_rate_local=rate_local,
+            my_local_time=my_local_time or now.isoformat(timespec="seconds"),
+            timezone_overlap_hours=working_overlap_hours(timezone, now) if zone else None,
         )
 
-    return VisitorContext(
-        ip=normalized_ip,
-        city=geo.get("city"),
-        country=geo.get("country_name"),
-        country_code=geo.get("country_code"),
-        timezone=geo.get("timezone"),
-        currency_code=currency_code,
-        currency_symbol=CURRENCY_SYMBOLS.get(currency_code, currency_code),
-        base_currency=BASE_CURRENCY,
-        conversion_rate=conversion_rate,
-        weather=weather,
-    )
+    def _mock_context(self) -> VisitorContext:
+        geo = {
+            "city": "London",
+            "country": "United Kingdom",
+            "country_code": "GB",
+            "timezone": "Europe/London",
+        }
+        weather = WeatherContext(
+            temperature_c=18.0,
+            apparent_temperature_c=18.0,
+            precipitation_mm=0.2,
+            weather_code=61,
+            description="light rain",
+            is_day=True,
+        )
+        return self._build(geo, weather, "GBP", 1.0)

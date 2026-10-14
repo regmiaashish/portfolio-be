@@ -7,7 +7,6 @@ from starlette.requests import Request
 
 from src.core.config import settings
 from src.core.rate_limit import client_ip
-from src.services import contact_service as contact_service_module
 
 
 def make_request(peer: str | None, headers: dict[str, str] | None = None) -> Request:
@@ -137,17 +136,13 @@ def test_spoofed_xff_does_not_bypass_limit(client, trust):
     assert statuses[-1] == 429
 
 
-def test_contact_is_limited(client, monkeypatch):
-    sent = []
-    monkeypatch.setattr(
-        contact_service_module.contact_service, "send_contact_email", lambda **kw: sent.append(kw)
-    )
+def test_contact_is_limited(client, fake_sender):
     payload = {"name": "Visitor", "email": "visitor@example.com", "message": "Hello"}
 
     statuses = [client.post("/api/v1/contact", json=payload).status_code for _ in range(6)]
 
-    assert statuses == [200] * 5 + [429]
-    assert len(sent) == 5
+    assert statuses == [202] * 5 + [429]
+    assert len(fake_sender.sent) == 5
 
 
 def test_health_is_never_limited(client):

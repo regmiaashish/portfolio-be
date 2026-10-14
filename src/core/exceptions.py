@@ -121,3 +121,37 @@ class ConflictError(AppException):
             status_code=409,
             errors=errors,
         )
+
+
+class VerificationFailedError(AppException):
+    """
+    Raised when a human-verification check (Cloudflare Turnstile) fails or is missing.
+    """
+
+    def __init__(
+        self,
+        message: str = "Verification failed. Please try again.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=400,
+            errors=errors,
+        )
+
+
+class ServiceUnavailableError(AppException):
+    """
+    Raised when an upstream dependency the request needs is unavailable.
+    """
+
+    def __init__(
+        self,
+        message: str = "The service is temporarily unavailable.",
+        errors: dict[str, Any] | list[Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            status_code=503,
+            errors=errors,
+        )

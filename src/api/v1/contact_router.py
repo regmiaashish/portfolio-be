@@ -1,34 +1,42 @@
-from fastapi import APIRouter, BackgroundTasks, Request, status
-from loguru import logger
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 
-from src.core.exceptions import EmailSendException
-from src.core.rate_limit import CONTACT_LIMIT, limiter
-from src.schemas.common_schema import APIResponse
+from src.core.dependencies import get_contact_delivery, get_contact_service
+from src.core.rate_limit import CONTACT_LIMIT, client_ip, limiter
+from src.schemas.common_schema import APIResponse, ErrorResponse
 from src.schemas.contact_schema import ContactRequest
-from src.services.contact_service import contact_service
+from src.services.contact_service import ContactDelivery, ContactService
 
 router = APIRouter(tags=["Message"])
 
+SUCCESS_MESSAGE = "Thanks! Your message is on its way."
 
-@router.post("/contact", response_model=APIResponse, status_code=status.HTTP_200_OK)
+
+@router.post(
+    "/contact",
+    response_model=APIResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        400: {"model": ErrorResponse, "description": "Turnstile verification failed"},
+        429: {"model": ErrorResponse, "description": "Too many messages"},
+    },
+)
 @limiter.limit(CONTACT_LIMIT)
 async def contact(
-    request: Request, contact_request: ContactRequest, background_tasks: BackgroundTasks
-):
-    """
-    Endpoint to handle contact form submissions.
-    """
-    try:
-        # Send the contact email in the background
+    request: Request,
+    payload: ContactRequest,
+    background_tasks: BackgroundTasks,
+    service: ContactService = Depends(get_contact_service),
+    delivery: ContactDelivery = Depends(get_contact_delivery),
+) -> APIResponse:
+    """Store the message, then email it after responding (202: accepted, not yet sent)."""
+    stored = await service.submit(payload, client_ip(request))
+    if stored is not None:
         background_tasks.add_task(
-            contact_service.send_contact_email,
-            name=contact_request.name,
-            email=contact_request.email,
-            message=contact_request.message,
+            delivery.deliver,
+            stored.id,
+            name=payload.name,
+            email=payload.email,
+            message=payload.message,
         )
-        return APIResponse(message="Your message has been sent successfully.")
-    except Exception as e:
-        logger.error(f"Error sending contact email: {e}")
-        raise EmailSendException(
-            message="An error occurred while sending your message. Please try again later.",
-        ) from e
+    # Spam dropped by the honeypot gets the same answer, so bots learn nothing.
+    return APIResponse(message=SUCCESS_MESSAGE)

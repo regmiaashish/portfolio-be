@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     smtp_password: SecretStr
     super_admin_email: str
 
+    # --- Contact form ---
+    # Public URL of a square image shown at the top of contact emails; empty = no image.
+    email_avatar_url: str = ""
+    # Send visitors a "message received" email. Only honoured when TURNSTILE_SECRET is
+    # also set, so the form can't be abused to mail arbitrary addresses.
+    contact_confirmation_enabled: bool = False
+
     # --- Links shown in emails ---
     portfolio_url: str
     github_url: str

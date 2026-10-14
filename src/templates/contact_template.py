@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from html import escape
 from urllib.parse import quote
 
@@ -10,9 +10,22 @@ def _single_line(value: str) -> str:
     return " ".join(value.splitlines()).strip()
 
 
+def _avatar_html() -> str:
+    """The header image, or nothing when EMAIL_AVATAR_URL is unset."""
+    url = settings.email_avatar_url.strip()
+    if not url:
+        return ""
+    return f"""<img src="{escape(url, quote=True)}" width="84" height="84" alt="Aashish Regmi"
+style="
+border-radius:50%;
+border:3px solid #A855F7;
+object-fit:cover;
+display:block;
+margin:0 auto 20px;
+"/>"""
+
+
 class ContactEmailTemplate:
-    # ---- Customize these once, and every email will use them ----
-    AVATAR_URL = "https://your-cdn-or-portfolio.com/assets/avatar.png"  # hosted publicly, square image works best
     PORTFOLIO_URL = settings.portfolio_url
     GITHUB_URL = settings.github_url
     LINKEDIN_URL = settings.linkedin_url
@@ -24,7 +37,8 @@ class ContactEmailTemplate:
         # All visitor input is escaped before it is placed in the HTML body.
         name, email, message = escape(name), escape(email), escape(message)
 
-        received_on = datetime.now().strftime("%B %d, %Y, %I:%M %p")
+        received_on = datetime.now(UTC).strftime("%B %d, %Y, %H:%M UTC")
+        avatar = _avatar_html()
 
         html = f"""
         <!DOCTYPE html>
@@ -63,14 +77,7 @@ background:linear-gradient(135deg,#2A1B4A,#171321 55%,#0F0D15);
 text-align:center;
 ">
 
-<img src="{ContactEmailTemplate.AVATAR_URL}" width="84" height="84" alt="Aashish Regmi"
-style="
-border-radius:50%;
-border:3px solid #A855F7;
-object-fit:cover;
-display:block;
-margin:0 auto 20px;
-"/>
+{avatar}
 
 <h3 style="
 margin:0;
@@ -340,3 +347,18 @@ This email was automatically generated from your portfolio website.
 
 
 contact_email_template = ContactEmailTemplate()
+
+
+def confirmation_email_template(name: str) -> tuple[str, str]:
+    """A short "message received" note for the visitor. Never echoes their message."""
+    first_name = escape(_single_line(name).split(" ")[0][:50]) or "there"
+    subject = "Thanks for getting in touch"
+    html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#0F1E33;">
+<p>Hi {first_name},</p>
+<p>Thanks for your message. It reached me, and I'll reply within a couple of working days.</p>
+<p>Aashish Regmi<br><a href="{escape(settings.portfolio_url, quote=True)}">{escape(settings.portfolio_url)}</a></p>
+<p style="color:#475569;font-size:12px;">You're receiving this because this address was entered
+in the contact form on my portfolio. If that wasn't you, you can ignore this email.</p>
+</body></html>"""
+    return subject, html
