@@ -1,15 +1,21 @@
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import Cookie, Depends, HTTPException, status
+import httpx
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
 from src.core.security import verify_token
 from src.models.user_model import User
+from src.repositories.contact_message_repo import ContactMessageRepository
 from src.repositories.user_repo import UserRepository
 from src.services.auth_service import AuthService
+from src.services.contact_service import ContactDelivery, ContactService, own_session_repository
+from src.services.context_service import ContextService
+from src.services.email_service import EmailSender, email_service
+from src.services.turnstile_service import TurnstileVerifier
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
@@ -71,3 +77,42 @@ async def require_superuser(current_user: User = Depends(get_current_user)) -> U
             status_code=status.HTTP_403_FORBIDDEN, detail="Superuser privileges required."
         )
     return current_user
+
+
+# --- Shared clients (created once per process in the app lifespan) ---
+
+
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http_client
+
+
+def get_context_service(request: Request) -> ContextService:
+    return request.app.state.context_service
+
+
+# --- Contact form ---
+
+
+def get_email_sender() -> EmailSender:
+    return email_service
+
+
+def get_contact_repository(session: AsyncSession = Depends(get_db)) -> ContactMessageRepository:
+    return ContactMessageRepository(session)
+
+
+def get_turnstile_verifier(
+    client: httpx.AsyncClient = Depends(get_http_client),
+) -> TurnstileVerifier:
+    return TurnstileVerifier(client, settings.turnstile_secret.get_secret_value())
+
+
+def get_contact_service(
+    repository: ContactMessageRepository = Depends(get_contact_repository),
+    verifier: TurnstileVerifier = Depends(get_turnstile_verifier),
+) -> ContactService:
+    return ContactService(repository, verifier)
+
+
+def get_contact_delivery(sender: EmailSender = Depends(get_email_sender)) -> ContactDelivery:
+    return ContactDelivery(sender, own_session_repository)

@@ -14,6 +14,7 @@ from src.core.config import settings
 
 CONTACT_LIMIT = "5/minute"
 LOGIN_LIMIT = "5/minute"
+CONTEXT_LIMIT = "30/minute"
 
 
 def _parse_ip(value: str | None) -> str | None:

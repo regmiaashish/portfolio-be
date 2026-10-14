@@ -106,6 +106,18 @@ Conventions:
 - Production migrations: see `docs/DB_MIGRATION_RUNBOOK.md`. `scripts/run.sh` only migrates on
   start when `RUN_MIGRATIONS=true`.
 
+## External calls and background work
+
+- All outbound HTTP uses the one `httpx.AsyncClient` created in the app lifespan
+  (`src/main.py`), injected with `Depends(get_http_client)`. Never create a client per request.
+- Optional upstreams (weather, FX) degrade to `null` fields; only a missing essential
+  upstream (geolocation) fails the request with `ServiceUnavailableError` (503).
+- Work that outlives the response (sending email) runs as a background task with its **own**
+  database session (`own_session_repository`), since the request's session is closed by then.
+  Blocking SMTP runs via `asyncio.to_thread`.
+- Contact spam controls: honeypot (`website`), Turnstile when `TURNSTILE_SECRET` is set, and
+  confirmation emails only when Turnstile is on.
+
 ## Testing
 
 - `tests/__init__.py` sets a complete dummy environment **before** `src` is imported, so tests never
