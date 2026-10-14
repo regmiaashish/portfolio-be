@@ -3,15 +3,19 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from loguru import logger
+from starlette.datastructures import UploadFile
 
+from src.core.config import settings
 from src.core.dependencies import (
     get_content_service,
     get_pitch_history_service,
     require_csrf,
     require_superuser,
 )
+from src.core.exceptions import UnprocessableError
+from src.core.rate_limit import UPLOAD_FILE_LIMIT, limiter
 from src.models.user_model import User
 from src.schemas.common_schema import ErrorResponse
 from src.schemas.content_schema import (
@@ -25,6 +29,7 @@ from src.schemas.content_schema import (
     ProfileOut,
     ProjectInput,
     SkillGroupInput,
+    StoredUploadOut,
     UploadOut,
     UploadRequest,
 )
@@ -37,6 +42,7 @@ from src.schemas.pitch_history_schema import (
 )
 from src.services.content_service import ContentService
 from src.services.pitch.history import PitchHistoryService, preview
+from src.services.upload_files import UploadTooLargeError, read_limited
 
 router = APIRouter(
     prefix="/admin",
@@ -274,6 +280,93 @@ async def create_upload(
         f"requested a {payload.purpose} upload URL for {upload.key} ({payload.content_type})",
     )
     return upload
+
+
+# Multipart framing (boundaries, part headers, the purpose field) on top of the file itself.
+_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+_UPLOAD_PURPOSES = ("project_image", "resume")
+
+_UPLOAD_FILE_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["file"],
+                    "properties": {
+                        "purpose": {
+                            "type": "string",
+                            "enum": list(_UPLOAD_PURPOSES),
+                            "default": "project_image",
+                        },
+                        "file": {"type": "string", "format": "binary"},
+                    },
+                }
+            }
+        },
+    }
+}
+
+
+def _too_large() -> UnprocessableError:
+    return UnprocessableError(
+        f"The file is too large: at most {settings.s3_max_upload_mb} MB.", loc=["body", "file"]
+    )
+
+
+@router.post(
+    "/uploads/file",
+    status_code=status.HTTP_201_CREATED,
+    response_model=StoredUploadOut,
+    openapi_extra=_UPLOAD_FILE_BODY,
+    responses={
+        422: {"model": ErrorResponse, "description": "Wrong file type, empty, or too large"},
+        502: {"model": ErrorResponse, "description": "Storage (S3) rejected the write"},
+        503: {"model": ErrorResponse, "description": "Uploads not configured"},
+    },
+    **_MUTATION,
+)
+@limiter.limit(UPLOAD_FILE_LIMIT)
+async def upload_file(
+    request: Request,
+    admin: User = Depends(require_superuser),
+    service: ContentService = Depends(get_content_service),
+) -> StoredUploadOut:
+    """Upload through the API: the server checks the file's real type and writes it to S3.
+
+    The body is parsed here rather than by FastAPI so an oversized request is refused from its
+    Content-Length before any of it is read.
+    """
+    service.ensure_uploads_enabled()
+    max_bytes = settings.s3_max_upload_mb * 1024 * 1024
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes + _MULTIPART_OVERHEAD_BYTES:
+        raise _too_large()
+
+    form = await request.form(max_files=1, max_fields=1)
+    try:
+        purpose = form.get("purpose") or "project_image"
+        if purpose not in _UPLOAD_PURPOSES:
+            raise UnprocessableError(
+                "purpose must be project_image or resume.", loc=["body", "purpose"]
+            )
+        upload = form.get("file")
+        if not isinstance(upload, UploadFile):
+            raise UnprocessableError("A file is required.", loc=["body", "file"])
+        try:
+            data = await read_limited(upload, max_bytes)
+        except UploadTooLargeError:
+            raise _too_large() from None
+        stored = await service.store_upload(str(purpose), data)
+    finally:
+        await form.close()
+
+    _audit(
+        admin,
+        f"uploaded a {purpose} file to {stored.key} ({stored.content_type}, {stored.size} bytes)",
+    )
+    return stored
 
 
 # --- Pitch history ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ from src.core.exceptions import (
     ConflictError,
     NotFoundError,
     ServiceUnavailableError,
+    StorageError,
     UnprocessableError,
 )
 from src.models.content_model import CareerEntry, Project, SiteProfile, SkillGroup
@@ -47,10 +48,15 @@ from src.schemas.content_schema import (
     SkillGroupInput,
     SkillGroupOut,
     SocialOut,
+    StoredUploadOut,
     UploadOut,
     UploadRequest,
 )
 from src.services.storage_service import StorageService
+from src.services.upload_files import detect_content_type
+
+# Upload keys are unique (uuid4), so stored objects never change and can be cached forever.
+UPLOAD_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 def public_url(key: str) -> str:
@@ -360,23 +366,57 @@ class ContentService:
 
     # --- Uploads -------------------------------------------------------------------------
 
-    def create_upload(self, request: UploadRequest) -> UploadOut:
+    def ensure_uploads_enabled(self) -> StorageService:
         if self.storage is None:
             raise ServiceUnavailableError(
                 "Uploads are not configured.", errors={"code": "uploads_disabled"}
             )
-        # The extension comes from the declared content type, never from the filename, and the
-        # folder from the purpose, so a résumé key can never pass as a project image key.
-        extensions, folder = UPLOAD_RULES[request.purpose]
-        key = f"{settings.s3_upload_prefix}{folder}{uuid4()}.{extensions[request.content_type]}"
+        return self.storage
+
+    @staticmethod
+    def new_upload_key(purpose: str, content_type: str) -> str:
+        # The extension comes from the content type, never from the filename, and the folder
+        # from the purpose, so a résumé key can never pass as a project image key.
+        extensions, folder = UPLOAD_RULES[purpose]
+        return f"{settings.s3_upload_prefix}{folder}{uuid4()}.{extensions[content_type]}"
+
+    def create_upload(self, request: UploadRequest) -> UploadOut:
+        storage = self.ensure_uploads_enabled()
+        key = self.new_upload_key(request.purpose, request.content_type)
         max_bytes = settings.s3_max_upload_mb * 1024 * 1024
-        presigned = self.storage.presign_upload(key, request.content_type, max_bytes)
+        presigned = storage.presign_upload(key, request.content_type, max_bytes)
         return UploadOut(
             url=presigned.url,
             fields=presigned.fields,
             key=key,
             public_url=public_url(key),
             max_bytes=max_bytes,
+        )
+
+    async def store_upload(self, purpose: str, data: bytes) -> StoredUploadOut:
+        """Write an upload to S3 after checking its real type (from its bytes) fits `purpose`."""
+        storage = self.ensure_uploads_enabled()
+        if not data:
+            raise UnprocessableError("The file is empty.", loc=["body", "file"])
+        content_type = detect_content_type(data[:64])
+        allowed, _folder = UPLOAD_RULES[purpose]
+        if content_type not in allowed:
+            expected = "a PDF" if purpose == "resume" else "a PNG, JPEG, WebP or AVIF image"
+            raise UnprocessableError(
+                f"The file must be {expected}; its contents don't match.", loc=["body", "file"]
+            )
+        key = self.new_upload_key(purpose, content_type)
+        try:
+            await storage.put_object(key, data, content_type, UPLOAD_CACHE_CONTROL)
+        except Exception as exc:
+            # Only the provider's error code is logged (never credentials or the request).
+            response = getattr(exc, "response", None)
+            code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
+            code = code or type(exc).__name__
+            logger.warning("S3 put_object failed for {}: {}", key, code)
+            raise StorageError() from exc
+        return StoredUploadOut(
+            key=key, public_url=public_url(key), content_type=content_type, size=len(data)
         )
 
     # --- Helpers -------------------------------------------------------------------------

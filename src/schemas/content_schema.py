@@ -299,6 +299,15 @@ class AdminContentOut(BaseModel):
     updated_at: datetime | None
 
 
+class StoredUploadOut(BaseModel):
+    """A file stored through POST /admin/uploads/file."""
+
+    key: str
+    public_url: str
+    content_type: str
+    size: int
+
+
 class UploadOut(BaseModel):
     url: str
     fields: dict[str, str]

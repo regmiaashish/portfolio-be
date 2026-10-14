@@ -150,8 +150,11 @@ Conventions:
   New mutating admin routes must use the `_MUTATION` dependencies, and log via `_audit()`.
 - Content lives in `src/models/content_model.py`; ordered tables share `OrderedRepository`
   (`list_all`, `create` appends at the end, `reorder` takes exactly every id).
-- Images: S3 behind `StorageService` (`src/services/storage_service.py`). The browser uploads
-  straight to S3 with a presigned POST (policy pins key, content type and size; 5 min). Keys are
+- Images: S3 behind `StorageService` (`src/services/storage_service.py`). Since Phase 6.1 the
+  admin uploads through the API (`POST /admin/uploads/file`): the type comes from the file's
+  bytes (`src/services/upload_files.py`), the body is read in bounded chunks, and the server
+  calls `put_object` (no bucket CORS needed). The older presigned-POST `POST /admin/uploads`
+  remains for compatibility (policy pins key, content type and size; 5 min). Keys are
   generated server-side as `<S3_UPLOAD_PREFIX>projects/<uuid4>.<ext>` (extension from the content
   type, never the filename) and `ImageInput` rejects anything else. Deleting old images is
   best-effort and never fails a request. Tests use `tests/content_fakes.py`; never real S3.

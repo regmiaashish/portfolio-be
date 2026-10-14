@@ -89,13 +89,16 @@ class FakeSkillGroupRepository(FakeOrderedRepository):
 
 
 class FakeStorage:
-    """Records presign and delete calls; set `fail_delete` to simulate an S3 outage."""
+    """Records presign, put and delete calls; set `fail_delete` / `put_error` to simulate S3
+    failures."""
 
     def __init__(self):
         self.presigned: list[dict[str, Any]] = []
         self.deleted: list[str] = []
         self.downloads: list[dict[str, Any]] = []
+        self.put: list[dict[str, Any]] = []
         self.fail_delete = False
+        self.put_error: Exception | None = None
 
     def presign_upload(self, key: str, content_type: str, max_bytes: int) -> PresignedUpload:
         self.presigned.append({"key": key, "content_type": content_type, "max_bytes": max_bytes})
@@ -107,6 +110,15 @@ class FakeStorage:
     def presign_get(self, key: str, filename: str, content_type: str) -> str:
         self.downloads.append({"key": key, "filename": filename, "content_type": content_type})
         return f"https://fake-bucket.s3.amazonaws.com/{key}?signed=1"
+
+    async def put_object(
+        self, key: str, data: bytes, content_type: str, cache_control: str
+    ) -> None:
+        if self.put_error is not None:
+            raise self.put_error
+        self.put.append(
+            {"key": key, "data": data, "content_type": content_type, "cache_control": cache_control}
+        )
 
     async def delete(self, key: str) -> None:
         if self.fail_delete:
