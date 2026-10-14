@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 import httpx
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -182,12 +182,22 @@ CSRF_HEADER = "X-Requested-With"
 CSRF_HEADER_VALUE = "portfolio-admin"
 
 
-def require_csrf(request: Request) -> None:
+def require_csrf(
+    request: Request,
+    # Declared (not just read from request.headers) so it appears in the OpenAPI schema and
+    # Swagger UI shows an input for it. The check below is unchanged.
+    x_requested_with: str | None = Header(
+        default=None,
+        alias=CSRF_HEADER,
+        description=f'CSRF protection: must be "{CSRF_HEADER_VALUE}".',
+        examples=[CSRF_HEADER_VALUE],
+    ),
+) -> None:
     """Mutating admin requests must carry the custom header (forces a CORS preflight) and come
     from an allowed Origin. Together with SameSite=Lax cookies this blocks cross-site forgery."""
     origin = request.headers.get("origin")
     if (
-        request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE
+        x_requested_with != CSRF_HEADER_VALUE
         or not origin
         or origin not in settings.allowed_origins
     ):
