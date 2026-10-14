@@ -104,11 +104,25 @@ uv run alembic upgrade head
 ## 5. Verify
 
 ```bash
-uv run alembic current   # expect: 0002_contact_messages (head)
+uv run alembic current   # expect: the newest revision, e.g. 0004_site_content (head)
 uv run alembic check     # expect: No new upgrade operations detected.
 ```
 
 Then run `scripts/smoke_prod.sh` after deploying; `/health/ready` should return 200.
+
+## After Phase 4.5: site content tables
+
+`alembic upgrade head` also applies `0003_pitch_usage` and `0004_site_content` (new, empty
+tables only; nothing existing changes). Then load today's site content once:
+
+```bash
+uv run alembic upgrade head      # expect: 0004_site_content (head)
+make seed-content                # or: uv run python scripts/seed_content.py
+```
+
+The seed only fills **empty** tables, so it is safe to run again and never overwrites edits
+made in the admin. Until it has run, `GET /api/v1/content` returns 503 and the public site
+shows its built-in copy of the content.
 
 ## Rollback
 

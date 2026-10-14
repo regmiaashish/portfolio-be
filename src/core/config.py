@@ -96,6 +96,33 @@ class Settings(BaseSettings):
     # Hard ceiling on one run, end to end.
     pitch_timeout_seconds: float = Field(default=45, gt=0)
 
+    # --- Image uploads (content admin) ---
+    # Same names as the server's existing .env. All optional: an empty bucket disables uploads.
+    aws_access_key_id: str = ""
+    aws_secret_access_key: SecretStr = SecretStr("")
+    aws_region: str = ""
+    s3_bucket_name: str = ""
+    # Where uploaded images are served from (CloudFront or custom domain); empty means the
+    # bucket's own URL: https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com
+    s3_public_base_url: str = ""
+    # Every upload key starts with this; the IAM key only needs access to this prefix.
+    s3_upload_prefix: str = "portfolio/"
+    s3_max_upload_mb: int = Field(default=5, gt=0, le=50)
+
+    @property
+    def uploads_enabled(self) -> bool:
+        return bool(self.s3_bucket_name)
+
+    @property
+    def s3_base_url(self) -> str:
+        if self.s3_public_base_url:
+            return self.s3_public_base_url.rstrip("/")
+        if self.s3_bucket_name and self.aws_region:
+            return f"https://{self.s3_bucket_name}.s3.{self.aws_region}.amazonaws.com"
+        if self.s3_bucket_name:
+            return f"https://{self.s3_bucket_name}.s3.amazonaws.com"
+        return ""
+
     @property
     def is_prod(self) -> bool:
         return self.env == "prod"
@@ -121,6 +148,14 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @field_validator("s3_upload_prefix")
+    @classmethod
+    def normalise_prefix(cls, value: str) -> str:
+        value = value.strip().lstrip("/")
+        if not value:
+            raise ValueError("S3_UPLOAD_PREFIX must not be empty")
+        return value if value.endswith("/") else f"{value}/"
 
     @field_validator("client_ip_header", "cookie_samesite", mode="before")
     @classmethod

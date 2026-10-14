@@ -1,7 +1,17 @@
 """Importing this package registers every model with Base.metadata (used by Alembic)."""
 
 from src.models.contact_message_model import ContactMessage, ContactMessageStatus
+from src.models.content_model import CareerEntry, Project, SiteProfile, SkillGroup
 from src.models.pitch_usage_model import PitchUsage
 from src.models.user_model import User
 
-__all__ = ["ContactMessage", "ContactMessageStatus", "PitchUsage", "User"]
+__all__ = [
+    "CareerEntry",
+    "ContactMessage",
+    "ContactMessageStatus",
+    "PitchUsage",
+    "Project",
+    "SiteProfile",
+    "SkillGroup",
+    "User",
+]

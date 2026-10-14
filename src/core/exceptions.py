@@ -169,3 +169,28 @@ class DailyCapReachedError(AppException):
 
     def __init__(self, message: str = "The demo is resting for today. Try again tomorrow."):
         super().__init__(message=message, status_code=429, errors={"code": "daily_cap"})
+
+
+class NotFoundError(AppException):
+    """Raised when a requested resource does not exist."""
+
+    def __init__(self, message: str = "Not found."):
+        super().__init__(message=message, status_code=404)
+
+
+class UnprocessableError(AppException):
+    """A 422 raised by business logic, in the same shape as request validation errors."""
+
+    def __init__(self, message: str, loc: list[str | int], error_type: str = "value_error"):
+        super().__init__(
+            message="Request validation failed.",
+            status_code=422,
+            errors=[{"loc": loc, "msg": message, "type": error_type}],
+        )
+
+
+class CsrfError(AppException):
+    """Raised when a mutating admin request lacks the CSRF header or an allowed Origin."""
+
+    def __init__(self, message: str = "Request blocked: missing or invalid CSRF protection."):
+        super().__init__(message=message, status_code=403, errors={"code": "csrf"})

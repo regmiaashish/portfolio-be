@@ -11,6 +11,7 @@ from src.core.error_handlers import register_exception_handlers
 from src.core.rate_limit import limiter
 from src.services.context_service import ContextService
 from src.services.pitch.stream import PitchCache
+from src.services.storage_service import create_storage
 
 OUTBOUND_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 
@@ -22,6 +23,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.http_client = client
         app.state.context_service = ContextService(client)
         app.state.pitch_cache = PitchCache(settings.pitch_cache_ttl_hours)
+        # S3 client for admin image uploads; None when no bucket is configured.
+        app.state.storage = create_storage(settings)
         yield
 
 
@@ -33,7 +36,7 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         title="Aashish Regmi Portfolio API",
         version="1.0.0",
         description=(
-            "Backend for the portfolio: contact, visitor context, Pitch Me and admin auth."
+            "Backend for the portfolio: contact, visitor context, Pitch Me, site content and admin."
         ),
         docs_url="/docs" if docs_enabled else None,
         redoc_url="/redoc" if docs_enabled else None,

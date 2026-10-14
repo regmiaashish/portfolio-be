@@ -135,6 +135,25 @@ Conventions:
   settings validator refuses fakes and missing keys when `PITCH_ENABLED=true`. Never call real
   providers from tests or scripts.
 
+## Site content and admin (Phase 4.5)
+
+- Spec: `docs/ADMIN_CMS_CONTRACT.md`. Change it first, then backend and frontend.
+- Public: `GET /api/v1/content` (published projects only, `position` order, ETag + 304,
+  `Cache-Control: public, max-age=60, stale-while-revalidate=600`).
+- Admin: everything under `/api/v1/admin` has a router-level `Depends(require_superuser)`.
+  Every **mutating** admin route also has `Depends(require_csrf)`: header
+  `X-Requested-With: portfolio-admin` plus an `Origin` in `ALLOWED_ORIGINS`, else 403 `csrf`.
+  New mutating admin routes must use the `_MUTATION` dependencies, and log via `_audit()`.
+- Content lives in `src/models/content_model.py`; ordered tables share `OrderedRepository`
+  (`list_all`, `create` appends at the end, `reorder` takes exactly every id).
+- Images: S3 behind `StorageService` (`src/services/storage_service.py`). The browser uploads
+  straight to S3 with a presigned POST (policy pins key, content type and size; 5 min). Keys are
+  generated server-side as `<S3_UPLOAD_PREFIX>projects/<uuid4>.<ext>` (extension from the content
+  type, never the filename) and `ImageInput` rejects anything else. Deleting old images is
+  best-effort and never fails a request. Tests use `tests/content_fakes.py`; never real S3.
+- Seed: `src/data/seed_content.json` via `scripts/seed_content.py` / `make seed-content`, which only
+  fills empty tables (never overwrites admin edits).
+
 ## Testing
 
 - `tests/__init__.py` sets a complete dummy environment **before** `src` is imported, so tests never
