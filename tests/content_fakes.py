@@ -94,6 +94,7 @@ class FakeStorage:
     def __init__(self):
         self.presigned: list[dict[str, Any]] = []
         self.deleted: list[str] = []
+        self.downloads: list[dict[str, Any]] = []
         self.fail_delete = False
 
     def presign_upload(self, key: str, content_type: str, max_bytes: int) -> PresignedUpload:
@@ -102,6 +103,10 @@ class FakeStorage:
             url="https://fake-bucket.s3.amazonaws.com/",
             fields={"key": key, "Content-Type": content_type, "policy": "fake"},
         )
+
+    def presign_get(self, key: str, filename: str, content_type: str) -> str:
+        self.downloads.append({"key": key, "filename": filename, "content_type": content_type})
+        return f"https://fake-bucket.s3.amazonaws.com/{key}?signed=1"
 
     async def delete(self, key: str) -> None:
         if self.fail_delete:

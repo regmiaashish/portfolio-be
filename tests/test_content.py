@@ -839,11 +839,17 @@ def parse_sitemap(response):
     ]
 
 
-def test_sitemap_on_an_empty_database_lists_only_home(content_client, site_url):
+def test_sitemap_on_an_empty_database_lists_home_and_top_level_pages(content_client, site_url):
     response = content_client.get("/sitemap.xml")
 
     assert response.status_code == 200
-    assert parse_sitemap(response) == [(f"{SITE}/", None)]
+    assert parse_sitemap(response) == [
+        (f"{SITE}/", None),
+        (f"{SITE}/work", None),
+        (f"{SITE}/pitch", None),
+        (f"{SITE}/about", None),
+        (f"{SITE}/contact", None),
+    ]
 
 
 def test_sitemap_headers_and_declaration(content_client, seeded, site_url):
@@ -864,6 +870,10 @@ def test_sitemap_lists_published_projects_in_order(admin_client, seeded, site_ur
 
     assert locations == [
         f"{SITE}/",
+        f"{SITE}/work",
+        f"{SITE}/pitch",
+        f"{SITE}/about",
+        f"{SITE}/contact",
         f"{SITE}/work/fagoon-upgrade",
         f"{SITE}/work/gains-garage",
         f"{SITE}/work/alliance",
@@ -877,8 +887,13 @@ def test_sitemap_lastmod_is_a_date(content_client, seeded, site_url):
 
     entries = parse_sitemap(content_client.get("/sitemap.xml"))
 
-    assert all(lastmod and re.fullmatch(r"\d{4}-\d{2}-\d{2}", lastmod) for _, lastmod in entries)
+    dated = {loc: lastmod for loc, lastmod in entries}
+    assert dated.pop(f"{SITE}/pitch") is None  # interactive demo: no content date
+    assert all(
+        lastmod and re.fullmatch(r"\d{4}-\d{2}-\d{2}", lastmod) for lastmod in dated.values()
+    )
     assert entries[0][1] == "2026-10-14"
+    assert dated[f"{SITE}/about"] == entries[0][1]
 
 
 def test_sitemap_escapes_special_characters():

@@ -13,6 +13,7 @@ from loguru import logger
 from src.core.config import Settings
 
 UPLOAD_EXPIRY_SECONDS = 300
+DOWNLOAD_EXPIRY_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class PresignedUpload:
 
 class StorageService(Protocol):
     def presign_upload(self, key: str, content_type: str, max_bytes: int) -> PresignedUpload: ...
+
+    def presign_get(self, key: str, filename: str, content_type: str) -> str: ...
 
     async def delete(self, key: str) -> None: ...
 
@@ -59,6 +62,20 @@ class S3Storage:
             ExpiresIn=UPLOAD_EXPIRY_SECONDS,
         )
         return PresignedUpload(url=presigned["url"], fields=dict(presigned["fields"]))
+
+    def presign_get(self, key: str, filename: str, content_type: str) -> str:
+        """A short-lived download link that makes browsers save the file as `filename`."""
+        # Signing is local (no network call); `filename` is already ASCII-safe.
+        return self.client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+                "ResponseContentType": content_type,
+            },
+            ExpiresIn=DOWNLOAD_EXPIRY_SECONDS,
+        )
 
     async def delete(self, key: str) -> None:
         # boto3 is synchronous; keep the network call off the event loop.

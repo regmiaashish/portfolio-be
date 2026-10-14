@@ -182,3 +182,32 @@ logged.
 
 `PitchRunSummary`: `id, company, role, outcome, duration_ms, estimated_cost_usd, created_at,
 preview` (first 160 characters of `pitch_text`, or null).
+
+## Résumé page (Phase 6)
+
+**Backend.** `GET /api/v1/resume/download` (no auth, `30/minute`, `Cache-Control: no-store`):
+
+- No `profile.resume_url` → 404 standard error (`errors.code = "resume_unavailable"`).
+- `resume_url` is one of our own uploads (under `<public base>/<S3_UPLOAD_PREFIX>resume/`) →
+  **302** to a presigned S3 **GET** URL (expires in 300 s) with
+  `ResponseContentDisposition = attachment; filename="<Profile-Name>-Resume.pdf"` (name made
+  filename-safe, e.g. `Aashish-Regmi-Resume.pdf`) and `ResponseContentType = application/pdf`.
+  This needs the AWS key to have `s3:GetObject` on the upload prefix.
+- Any other URL (e.g. Google Drive) → **302** to it unchanged.
+- S3 not configured but the URL is ours → 302 to the public URL (best effort).
+
+`GET /sitemap.xml` also lists `PORTFOLIO_URL/resume` (lastmod = content date) **only when**
+`resume_url` is set.
+
+**Frontend.**
+
+- Public `/resume`: page header; when `resume_url` is set, an inline PDF viewer (`<iframe>`
+  with a descriptive `title`, ~80vh on desktop) plus **Download PDF** (→ the download endpoint on
+  `VITE_API_URL`) and **Open in new tab** (→ `resume_url`). On narrow or touch screens, where
+  inline PDF viewing is unreliable, the buttons lead and the viewer is optional. When unset: a
+  calm "not available yet" panel with links to `/contact` and `/about`. Per-page meta; `noindex`
+  only when no résumé is set.
+- Navigation: "Résumé" in the header nav; the hero/contact/about résumé links point to `/resume`.
+- Admin: a dedicated **Résumé** tab (upload PDF via `purpose: "resume"`, current file with
+  preview/open, replace, remove; saves `resume_url` via `PUT /admin/profile` with the rest of the
+  profile unchanged). The Profile editor's résumé field may stay or link to the tab.

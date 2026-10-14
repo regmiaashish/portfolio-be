@@ -4,6 +4,8 @@ Rules from docs/ADMIN_CMS_CONTRACT.md: public reads only see published projects;
 `position` order; replacing or removing a project image deletes the old S3 object best-effort.
 """
 
+import re
+import unicodedata
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
@@ -65,6 +67,13 @@ def own_resume_key(url: str | None) -> str | None:
     if not url.startswith(folder_url) or len(url) == len(folder_url):
         return None
     return url[len(base) + 1 :]
+
+
+def resume_filename(name: str | None) -> str:
+    """ASCII-safe download name, e.g. "Aashish Regmi" -> "Aashish-Regmi-Resume.pdf"."""
+    ascii_name = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", ascii_name).strip("-")
+    return f"{slug}-Resume.pdf" if slug else "Resume.pdf"
 
 
 # --- Model -> schema ---------------------------------------------------------------------
@@ -246,6 +255,25 @@ class ContentService:
                 ]
             ),
         )
+
+    async def resume_download_url(self) -> str:
+        """Where GET /resume/download redirects: a presigned attachment link for our own
+        uploads, the URL itself otherwise. NotFoundError when no résumé is set."""
+        profile = await self.profiles.get()
+        url = profile.resume_url if profile else None
+        if not url:
+            raise NotFoundError(
+                "No résumé is available yet.", errors={"code": "resume_unavailable"}
+            )
+        key = own_resume_key(url)
+        if key and self.storage is not None:
+            return self.storage.presign_get(key, resume_filename(profile.name), "application/pdf")
+        # External link (e.g. Google Drive), or our upload with S3 not configured: best effort.
+        return url
+
+    async def has_resume(self) -> bool:
+        profile = await self.profiles.get()
+        return bool(profile and profile.resume_url)
 
     async def sitemap_entries(self) -> tuple[datetime | None, list[tuple[str, datetime | None]]]:
         """(home page lastmod, [(slug, lastmod)] for published projects). Works on an empty DB."""
