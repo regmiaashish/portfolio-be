@@ -1,0 +1,182 @@
+{
+  "profile": {
+    "name": "Aashish Regmi",
+    "role": "Backend & AI engineer",
+    "location": "Kathmandu, Nepal",
+    "tagline": "I build backends that stay up and AI that ships.",
+    "summary": "Junior backend developer at Fagoon AI, building RESTful APIs and backend infrastructure. I've shipped production systems across AI platforms, SaaS and real estate with Python, FastAPI, Django, GCP, Docker, PostgreSQL, MongoDB, Twilio and ElevenLabs.",
+    "email": "regmiaashish660@gmail.com",
+    "phone": {
+      "display": "+977 9840046034",
+      "href": "tel:+9779840046034"
+    },
+    "socials": [
+      {
+        "kind": "github",
+        "label": "GitHub",
+        "href": "https://github.com/regmiaashish"
+      },
+      {
+        "kind": "linkedin",
+        "label": "LinkedIn",
+        "href": "https://www.linkedin.com/in/aashish-regmi-228868309"
+      },
+      {
+        "kind": "instagram",
+        "label": "Instagram",
+        "href": "https://www.instagram.com/regs.exe"
+      }
+    ]
+  },
+  "projects": [
+    {
+      "slug": "fagoon-upgrade",
+      "name": "Fagoon Upgrade",
+      "category": "Open-source AI platform",
+      "summary": "A self-hosted AI platform: drag-and-drop workflow building, WhatsApp agent deployment and local LLM integration.",
+      "stack": [
+        "FastAPI",
+        "Python",
+        "Docker",
+        "OpenAI",
+        "Gemini",
+        "Ollama",
+        "Twilio"
+      ],
+      "repo_url": null,
+      "demo_url": null,
+      "image": null,
+      "case_study": null,
+      "published": true
+    },
+    {
+      "slug": "gains-garage",
+      "name": "Gains Garage backend",
+      "category": "SaaS with generative AI",
+      "summary": "Production APIs for the Gains Garage SaaS platform, including Stripe billing.",
+      "stack": [
+        "FastAPI",
+        "PostgreSQL",
+        "NeonDB",
+        "GCP",
+        "Stripe"
+      ],
+      "repo_url": null,
+      "demo_url": null,
+      "image": null,
+      "case_study": null,
+      "published": true
+    },
+    {
+      "slug": "alliance",
+      "name": "Alliance backend",
+      "category": "AI calling platform",
+      "summary": "An automated AI calling pipeline built on Twilio and ElevenLabs voice.",
+      "stack": [
+        "FastAPI",
+        "Python",
+        "MongoDB",
+        "Twilio",
+        "ElevenLabs",
+        "Stripe"
+      ],
+      "repo_url": null,
+      "demo_url": null,
+      "image": null,
+      "case_study": null,
+      "published": true
+    },
+    {
+      "slug": "jarvis",
+      "name": "Jarvis voice assistant",
+      "category": "Desktop app",
+      "summary": "A desktop voice assistant with speech recognition and text to speech.",
+      "stack": [
+        "Python",
+        "SpeechRecognition",
+        "pyttsx3"
+      ],
+      "repo_url": "https://github.com/regmiaashish/jarvis",
+      "demo_url": null,
+      "image": null,
+      "case_study": null,
+      "published": true
+    },
+    {
+      "slug": "cricket-management-system",
+      "name": "Cricket management system",
+      "category": "Web application",
+      "summary": "Team, player and match management with JWT authentication.",
+      "stack": [
+        "Python",
+        "Django",
+        "MySQL",
+        "JWT"
+      ],
+      "repo_url": "https://github.com/regmiaashish/cricket-management-system",
+      "demo_url": null,
+      "image": null,
+      "case_study": null,
+      "published": true
+    }
+  ],
+  "career": [
+    {
+      "role": "Junior backend developer",
+      "company": "Fagoon AI",
+      "period": "Now",
+      "summary": "Building and maintaining REST APIs and backend infrastructure across Fagoon AI's products. Core contributor to Fagoon Upgrade, an open-source, self-hosted AI platform."
+    },
+    {
+      "role": "Backend developer intern",
+      "company": "Fagoon AI",
+      "period": "2026",
+      "summary": "Built production APIs for the Gains Garage SaaS platform and Alliance's AI calling pipeline, integrating ElevenLabs, Twilio and Stripe."
+    },
+    {
+      "role": "Python / Django intern",
+      "company": "Treeleaf Technologies",
+      "period": "2024",
+      "summary": "Built REST APIs and candlestick charts for Bluerock, a stock trading platform, and worked on a FastAPI backend for PDF plagiarism and grammar analysis."
+    }
+  ],
+  "skills": [
+    {
+      "title": "Backend",
+      "description": "APIs and data layers that are typed, tested and boring to operate.",
+      "skills": [
+        "Python",
+        "FastAPI",
+        "Django",
+        "Pydantic",
+        "SQLAlchemy",
+        "PostgreSQL",
+        "MongoDB",
+        "SQL"
+      ]
+    },
+    {
+      "title": "AI integration",
+      "description": "LLMs and voice wired into real products, with cost and abuse controls.",
+      "skills": [
+        "OpenAI",
+        "Gemini",
+        "Ollama",
+        "LangChain",
+        "ElevenLabs",
+        "Twilio"
+      ]
+    },
+    {
+      "title": "Infrastructure",
+      "description": "Shipping and running it: containers, cloud, payments and auth.",
+      "skills": [
+        "Docker",
+        "GCP",
+        "NeonDB",
+        "Stripe",
+        "JWT"
+      ]
+    }
+  ]
+}

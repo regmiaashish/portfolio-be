@@ -70,13 +70,48 @@ def test_unknown_env_value_is_rejected():
 
 
 def test_retired_keys_in_environment_are_ignored(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "legacy")
     monkeypatch.setenv("FRONTEND_URL", "https://legacy.example")
+    monkeypatch.setenv("SOME_OLD_SETTING", "legacy")
 
     settings = make_settings()
 
-    assert not hasattr(settings, "aws_access_key_id")
     assert not hasattr(settings, "frontend_url")
+    assert not hasattr(settings, "some_old_setting")
+
+
+def test_s3_settings_reuse_the_existing_env_names(monkeypatch, without_test_env):
+    # Phase 4.5 reads the AWS_* / S3_BUCKET_NAME keys already in the server's .env.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret-value")
+    monkeypatch.setenv("AWS_REGION", "ap-south-1")
+    monkeypatch.setenv("S3_BUCKET_NAME", "my-bucket")
+
+    settings = make_settings()
+
+    assert settings.uploads_enabled
+    assert settings.s3_base_url == "https://my-bucket.s3.ap-south-1.amazonaws.com"
+    assert "aws-secret-value" not in repr(settings)
+    assert settings.aws_secret_access_key.get_secret_value() == "aws-secret-value"
+
+
+def test_uploads_disabled_without_bucket(without_test_env):
+    settings = make_settings()
+
+    assert not settings.uploads_enabled
+    assert settings.s3_base_url == ""
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("portfolio", "portfolio/"), ("/site/img/", "site/img/")]
+)
+def test_upload_prefix_is_normalised(raw, expected):
+    assert make_settings(s3_upload_prefix=raw).s3_upload_prefix == expected
+
+
+def test_public_base_url_overrides_bucket_url():
+    settings = make_settings(s3_bucket_name="b", s3_public_base_url="https://cdn.example.com/")
+
+    assert settings.s3_base_url == "https://cdn.example.com"
 
 
 def test_secrets_are_masked_in_repr():

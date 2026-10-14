@@ -7,14 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
-from src.core.exceptions import PitchDisabledError
+from src.core.exceptions import CsrfError, PitchDisabledError
 from src.core.security import verify_token
 from src.models.user_model import User
 from src.repositories.contact_message_repo import ContactMessageRepository
+from src.repositories.content_repo import (
+    CareerRepository,
+    ProfileRepository,
+    ProjectRepository,
+    SkillGroupRepository,
+)
 from src.repositories.pitch_usage_repo import PitchUsageRepository
 from src.repositories.user_repo import UserRepository
 from src.services.auth_service import AuthService
 from src.services.contact_service import ContactDelivery, ContactService, own_session_repository
+from src.services.content_service import ContentService
 from src.services.context_service import ContextService
 from src.services.email_service import EmailSender, email_service
 from src.services.pitch.graph import PitchPipeline
@@ -22,6 +29,7 @@ from src.services.pitch.llm import create_llm
 from src.services.pitch.research import create_research
 from src.services.pitch.service import PipelineFactory, PitchService
 from src.services.pitch.stream import PitchCache
+from src.services.storage_service import StorageService
 from src.services.turnstile_service import TurnstileVerifier
 
 
@@ -154,3 +162,39 @@ def get_pitch_service(
     pipeline_factory: PipelineFactory = Depends(get_pitch_pipeline_factory),
 ) -> PitchService:
     return PitchService(verifier, usage, cache, pipeline_factory)
+
+
+# --- Site content and admin ---
+
+CSRF_HEADER = "X-Requested-With"
+CSRF_HEADER_VALUE = "portfolio-admin"
+
+
+def require_csrf(request: Request) -> None:
+    """Mutating admin requests must carry the custom header (forces a CORS preflight) and come
+    from an allowed Origin. Together with SameSite=Lax cookies this blocks cross-site forgery."""
+    origin = request.headers.get("origin")
+    if (
+        request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE
+        or not origin
+        or origin not in settings.allowed_origins
+    ):
+        raise CsrfError()
+
+
+def get_storage(request: Request) -> StorageService | None:
+    return getattr(request.app.state, "storage", None)
+
+
+def get_content_service(
+    session: AsyncSession = Depends(get_db),
+    storage: StorageService | None = Depends(get_storage),
+) -> ContentService:
+    # One session shared by every repository, so a request sees one consistent snapshot.
+    return ContentService(
+        ProfileRepository(session),
+        ProjectRepository(session),
+        CareerRepository(session),
+        SkillGroupRepository(session),
+        storage,
+    )
