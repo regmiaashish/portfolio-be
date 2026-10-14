@@ -104,7 +104,7 @@ uv run alembic upgrade head
 ## 5. Verify
 
 ```bash
-uv run alembic current   # expect: the newest revision, e.g. 0005_profile_resume (head)
+uv run alembic current   # expect: the newest revision, e.g. 0007_contact_read_at (head)
 uv run alembic check     # expect: No new upgrade operations detected.
 ```
 
@@ -136,6 +136,12 @@ shows its built-in copy of the content.
 `site_profile.resume_url` column (no data changes; `downgrade -1` drops it again).
 It also applies `0006_pitch_runs`, a new, empty table for the admin's Pitch history (no visitor
 IPs are stored; `downgrade -1` drops it, losing only the history).
+
+## After Phase 6.3: contact messages in the admin
+
+`alembic upgrade head` applies `0007_contact_read_at`, which only adds a nullable
+`contact_messages.read_at` column plus an index (no data changes; every existing message starts
+unread). `downgrade -1` drops both again, losing only the read/unread state.
 
 ## Afterwards
 

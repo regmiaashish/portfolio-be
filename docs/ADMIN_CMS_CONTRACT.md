@@ -262,3 +262,34 @@ URLs: set `S3_PUBLIC_BASE_URL=<API origin>/api/v1/media` and nothing else change
 `url`s, the upload response's `public_url` and the résumé URL all point at this endpoint; the
 old-résumé cleanup recognises them as our own; `GET /resume/download` still redirects to a
 presigned S3 GET (attachment).
+
+## Contact messages in the admin (Phase 6.3)
+
+Every contact-form submission is already stored in `contact_messages` (Phase 3). The admin can
+read and manage them. As before, **no IP address or other visitor data** is stored.
+
+**Migration `0007_contact_read_at`:** add nullable `read_at timestamptz` to `contact_messages`
+(NULL = unread) plus an index useful for the unread count. Existing rows stay unread.
+
+**Endpoints** (superuser; mutating ones also need the CSRF header and allowed Origin):
+
+| Method & path | Result |
+|---|---|
+| `GET /admin/messages?limit=20&offset=0&q=&status=&unread=` | 200 `{"items": [MessageSummary], "total": n, "limit": 20, "offset": 0}`, newest first. `limit` 1–100; `q` (≤ 100) matches name, email or message case-insensitively; `status` = `pending`\|`sent`\|`failed`; `unread=true` only unread |
+| `GET /admin/messages/stats` | 200 `{"unread": n, "failed": n, "total": n, "last_7_days": n}` |
+| `GET /admin/messages/{id}` | 200 MessageDetail, or 404. Does **not** change the read state by itself |
+| `PATCH /admin/messages/{id}` | body `{"read": true\|false}` → 200 MessageDetail (sets/clears `read_at`) |
+| `POST /admin/messages/{id}/retry` | only when `status = "failed"`: sets it back to `pending`, re-sends the notification email in the background (same delivery path as the form) → 202 MessageDetail; otherwise 409 `errors.code = "not_failed"` |
+| `DELETE /admin/messages/{id}` | 204 or 404 |
+
+`MessageSummary`: `id, name, email, preview` (first 160 characters of the message),
+`status, read` (bool), `created_at`. `MessageDetail`: every column (`id, name, email, message,
+status, error, read_at, created_at`) plus `read`. Route order: `/stats` before `/{id}`. All
+mutations are audit-logged with the admin's email (never the message body).
+
+**Frontend:** an admin **Messages** tab (`/admin/messages`) with an unread-count badge in the nav
+(from `/stats`), filters (All · Unread · Email failed), debounced search, pagination, and a
+detail view (`/admin/messages/:id`) that marks the message read when opened, with **Reply**
+(`mailto:` the sender, subject `Re: your message on aashish-regmi.com.np`), Copy email, Mark as
+unread, Retry email (only for failed), and Delete (confirm dialog). Message text is shown as
+plain text (pre-wrap), never as HTML.

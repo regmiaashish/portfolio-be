@@ -20,6 +20,7 @@ from src.core.security import create_access_token, hash_password
 from src.main import app
 from src.models.contact_message_model import ContactMessage, ContactMessageStatus
 from src.models.user_model import User
+from src.repositories.contact_message_repo import ContactMessageCounts
 from src.services.contact_service import ContactDelivery
 
 DEFAULT_PASSWORD = "a-long-enough-password"
@@ -77,6 +78,49 @@ class FakeContactRepository:
     async def mark_failed(self, message_id: uuid.UUID, error: str) -> None:
         self.messages[message_id].status = ContactMessageStatus.FAILED
         self.messages[message_id].error = error
+
+    # Admin (Phase 6.3); the real SQL is covered by tests/test_contact_admin_db.py.
+
+    async def list(self, *, limit, offset, q=None, status=None, unread=False):
+        def matches(m: ContactMessage) -> bool:
+            text = f"{m.name}\n{m.email}\n{m.message}".lower()
+            return (
+                (not q or q.lower() in text)
+                and (not status or m.status == status)
+                and (not unread or m.read_at is None)
+            )
+
+        rows = sorted(
+            (m for m in self.messages.values() if matches(m)),
+            key=lambda m: m.created_at,
+            reverse=True,
+        )
+        return rows[offset : offset + limit], len(rows)
+
+    async def counts(self, recent_since: datetime) -> ContactMessageCounts:
+        rows = list(self.messages.values())
+        return ContactMessageCounts(
+            unread=sum(m.read_at is None for m in rows),
+            failed=sum(m.status == ContactMessageStatus.FAILED for m in rows),
+            total=len(rows),
+            recent=sum(m.created_at >= recent_since for m in rows),
+        )
+
+    async def get(self, message_id: uuid.UUID) -> ContactMessage | None:
+        return self.messages.get(message_id)
+
+    async def set_read_at(self, record: ContactMessage, read_at: datetime | None) -> None:
+        record.read_at = read_at
+
+    async def delete(self, record: ContactMessage) -> None:
+        del self.messages[record.id]
+
+    async def mark_pending_for_retry(self, message_id: uuid.UUID) -> bool:
+        record = self.messages.get(message_id)
+        if record is None or record.status != ContactMessageStatus.FAILED:
+            return False
+        record.status, record.error = ContactMessageStatus.PENDING, None
+        return True
 
 
 class FakeEmailSender:

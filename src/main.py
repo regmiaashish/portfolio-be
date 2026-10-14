@@ -9,6 +9,7 @@ from src.api.api_router import api_router
 from src.core.config import Settings, settings
 from src.core.database import AsyncSessionLocal
 from src.core.error_handlers import register_exception_handlers
+from src.core.logging import configure_logging
 from src.core.rate_limit import limiter
 from src.services.context_service import ContextService
 from src.services.pitch.history import DbPitchRecorder
@@ -16,6 +17,8 @@ from src.services.pitch.stream import PitchCache
 from src.services.storage_service import create_storage
 
 OUTBOUND_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
+
+configure_logging()
 
 
 @asynccontextmanager

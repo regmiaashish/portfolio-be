@@ -3,12 +3,14 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response, status
 from loguru import logger
 from starlette.datastructures import UploadFile
 
 from src.core.config import settings
 from src.core.dependencies import (
+    get_contact_admin_service,
+    get_contact_delivery,
     get_content_service,
     get_pitch_history_service,
     require_csrf,
@@ -18,6 +20,14 @@ from src.core.exceptions import UnprocessableError
 from src.core.rate_limit import UPLOAD_FILE_LIMIT, limiter
 from src.models.user_model import User
 from src.schemas.common_schema import ErrorResponse
+from src.schemas.contact_message_schema import (
+    MessageDetail,
+    MessageList,
+    MessageReadInput,
+    MessageStats,
+    MessageStatusName,
+    MessageSummary,
+)
 from src.schemas.content_schema import (
     AdminCareerOut,
     AdminContentOut,
@@ -40,6 +50,8 @@ from src.schemas.pitch_history_schema import (
     PitchRunSummary,
     PitchStats,
 )
+from src.services.contact_admin_service import ContactAdminService, message_preview
+from src.services.contact_service import ContactDelivery
 from src.services.content_service import ContentService
 from src.services.pitch.history import PitchHistoryService, preview
 from src.services.upload_files import UploadTooLargeError, read_limited
@@ -424,4 +436,114 @@ async def delete_pitch_run(
 ) -> Response:
     record = await service.delete(run_id)
     _audit(admin, f"deleted pitch run for {record.company} / {record.role} ({run_id})")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Contact messages ------------------------------------------------------------------------
+# /messages/stats is declared before /messages/{message_id} for the same reason.
+
+_NOT_FAILED = {409: {"model": ErrorResponse, "description": "The message's email didn't fail"}}
+
+
+@router.get("/messages", response_model=MessageList)
+async def list_messages(
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    status_filter: Annotated[MessageStatusName | None, Query(alias="status")] = None,
+    unread: bool = False,
+    service: ContactAdminService = Depends(get_contact_admin_service),
+) -> MessageList:
+    """Contact-form messages, newest first."""
+    search = q.strip() if q else None
+    records, total = await service.list(
+        limit=limit, offset=offset, q=search or None, status=status_filter, unread=unread
+    )
+    items = [
+        MessageSummary(
+            id=record.id,
+            name=record.name,
+            email=record.email,
+            preview=message_preview(record.message),
+            status=record.status,
+            read=record.read_at is not None,
+            created_at=record.created_at,
+        )
+        for record in records
+    ]
+    return MessageList(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/messages/stats", response_model=MessageStats)
+async def message_stats(
+    service: ContactAdminService = Depends(get_contact_admin_service),
+) -> MessageStats:
+    """Unread and failed counts (for the nav badge), the total, and the last 7 days."""
+    return MessageStats.model_validate(await service.stats())
+
+
+@router.get("/messages/{message_id}", response_model=MessageDetail, responses=_NOT_FOUND)
+async def get_message(
+    message_id: UUID,
+    service: ContactAdminService = Depends(get_contact_admin_service),
+) -> MessageDetail:
+    """The full message. Reading it doesn't mark it read; PATCH does."""
+    return MessageDetail.model_validate(await service.get(message_id))
+
+
+@router.patch(
+    "/messages/{message_id}", response_model=MessageDetail, responses=_NOT_FOUND, **_MUTATION
+)
+async def set_message_read(
+    message_id: UUID,
+    payload: MessageReadInput,
+    admin: User = Depends(require_superuser),
+    service: ContactAdminService = Depends(get_contact_admin_service),
+) -> MessageDetail:
+    record = await service.set_read(message_id, payload.read)
+    _audit(admin, f"marked message {message_id} as {'read' if payload.read else 'unread'}")
+    return MessageDetail.model_validate(record)
+
+
+@router.post(
+    "/messages/{message_id}/retry",
+    response_model=MessageDetail,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_NOT_FAILED},
+    **_MUTATION,
+)
+async def retry_message(
+    message_id: UUID,
+    background_tasks: BackgroundTasks,
+    admin: User = Depends(require_superuser),
+    service: ContactAdminService = Depends(get_contact_admin_service),
+    delivery: ContactDelivery = Depends(get_contact_delivery),
+) -> MessageDetail:
+    """Re-send the notification email of a failed message (202: back to pending)."""
+    record = await service.retry(message_id)
+    # The same background delivery as the contact form: pending -> sent | failed.
+    background_tasks.add_task(
+        delivery.deliver,
+        record.id,
+        name=record.name,
+        email=record.email,
+        message=record.message,
+    )
+    _audit(admin, f"retried the email for message {message_id}")
+    return MessageDetail.model_validate(record)
+
+
+@router.delete(
+    "/messages/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=_NOT_FOUND,
+    **_MUTATION,
+)
+async def delete_message(
+    message_id: UUID,
+    admin: User = Depends(require_superuser),
+    service: ContactAdminService = Depends(get_contact_admin_service),
+) -> Response:
+    await service.delete(message_id)
+    _audit(admin, f"deleted message {message_id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -21,6 +21,7 @@ from src.repositories.pitch_run_repo import PitchRunRepository
 from src.repositories.pitch_usage_repo import PitchUsageRepository
 from src.repositories.user_repo import UserRepository
 from src.services.auth_service import AuthService
+from src.services.contact_admin_service import ContactAdminService
 from src.services.contact_service import ContactDelivery, ContactService, own_session_repository
 from src.services.content_service import ContentService
 from src.services.context_service import ContextService
@@ -134,6 +135,12 @@ def get_contact_service(
 
 def get_contact_delivery(sender: EmailSender = Depends(get_email_sender)) -> ContactDelivery:
     return ContactDelivery(sender, own_session_repository)
+
+
+def get_contact_admin_service(
+    repository: ContactMessageRepository = Depends(get_contact_repository),
+) -> ContactAdminService:
+    return ContactAdminService(repository)
 
 
 # --- Pitch Me ---
