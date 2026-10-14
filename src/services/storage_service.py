@@ -1,7 +1,7 @@
-"""Image storage for the content admin: S3, behind a small interface tests can fake.
+"""Image and résumé storage for the content admin: S3, behind a small interface tests can fake.
 
-Uploads never pass through the API: the admin's browser POSTs the file straight to S3 using
-a short-lived presigned POST whose policy pins the key, the content type and the size.
+Since Phase 6.1 the admin uploads through the API, which writes to S3 server-side (no bucket
+CORS needed). The presigned POST path is kept for compatibility.
 """
 
 import asyncio
@@ -26,6 +26,10 @@ class StorageService(Protocol):
     def presign_upload(self, key: str, content_type: str, max_bytes: int) -> PresignedUpload: ...
 
     def presign_get(self, key: str, filename: str, content_type: str) -> str: ...
+
+    async def put_object(
+        self, key: str, data: bytes, content_type: str, cache_control: str
+    ) -> None: ...
 
     async def delete(self, key: str) -> None: ...
 
@@ -75,6 +79,19 @@ class S3Storage:
                 "ResponseContentType": content_type,
             },
             ExpiresIn=DOWNLOAD_EXPIRY_SECONDS,
+        )
+
+    async def put_object(
+        self, key: str, data: bytes, content_type: str, cache_control: str
+    ) -> None:
+        # boto3 is synchronous; keep the network call off the event loop.
+        await asyncio.to_thread(
+            self.client.put_object,
+            Bucket=self.bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            CacheControl=cache_control,
         )
 
     async def delete(self, key: str) -> None:

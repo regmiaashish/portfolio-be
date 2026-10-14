@@ -211,3 +211,31 @@ preview` (first 160 characters of `pitch_text`, or null).
 - Admin: a dedicated **Résumé** tab (upload PDF via `purpose: "resume"`, current file with
   preview/open, replace, remove; saves `resume_url` via `PUT /admin/profile` with the rest of the
   profile unchanged). The Profile editor's résumé field may stay or link to the tab.
+
+## Uploads through the API (Phase 6.1)
+
+Browser-to-S3 presigned uploads need bucket CORS. To avoid that, the admin now uploads through
+the API, which writes to S3 server-side. (`POST /admin/uploads` presign stays for compatibility
+but the frontend no longer uses it.)
+
+`POST /api/v1/admin/uploads/file` — superuser + CSRF (header and Origin), `multipart/form-data`
+with fields `purpose` (`"project_image"` | `"resume"`, default `project_image`) and `file`.
+
+- Type is decided from the file's **content** (magic bytes), not its name or declared type:
+  PDF (`%PDF-`), PNG, JPEG, WebP (`RIFF....WEBP`), AVIF (`ftyp` box with `avif`/`avis` brand).
+  `project_image` accepts PNG/JPEG/WebP/AVIF; `resume` accepts PDF only. Mismatch → 422 on
+  `file` (`errors[].loc = ["body","file"]`).
+- Size: 1 byte to `S3_MAX_UPLOAD_MB`; read in chunks and stop as soon as the limit is exceeded
+  (never buffer an unbounded body) → 413-style 422 on `file` with a clear message. Rate limit
+  `20/minute`.
+- Key: same format as before (`<prefix>projects/<uuid4>.<ext>` or `<prefix>resume/<uuid4>.pdf`,
+  extension from the detected type). Stored with the detected `ContentType` and
+  `Cache-Control: public, max-age=31536000, immutable` (keys are unique). S3 `put_object` runs in
+  a thread.
+- 503 `uploads_disabled` when S3 is not configured; S3 failures → 502 with a safe message and
+  the AWS error code in the log only.
+- Response 201: `{"key": "...", "public_url": "...", "content_type": "...", "size": n}`.
+- Audit-logged with the admin's email.
+
+AWS needs no bucket CORS for this; the key still needs `s3:PutObject`, `s3:GetObject`,
+`s3:DeleteObject` on the prefix, and images need public read (or CloudFront) to display.

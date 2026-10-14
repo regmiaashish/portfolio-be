@@ -157,6 +157,16 @@ class ServiceUnavailableError(AppException):
         )
 
 
+class StorageError(AppException):
+    """
+    Raised when object storage (S3) rejects or fails a write. The message is safe to show;
+    the provider's error code goes to the log only.
+    """
+
+    def __init__(self, message: str = "Couldn't save the file to storage. Please try again."):
+        super().__init__(message=message, status_code=502, errors={"code": "storage_error"})
+
+
 class PitchDisabledError(AppException):
     """Raised when Pitch Me is switched off (PITCH_ENABLED=false)."""
 

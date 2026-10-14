@@ -18,6 +18,7 @@ CONTEXT_LIMIT = "30/minute"
 CONTENT_LIMIT = "60/minute"
 SITEMAP_LIMIT = "30/minute"
 RESUME_LIMIT = "30/minute"
+UPLOAD_FILE_LIMIT = "20/minute"
 # Each Pitch Me run costs money; the daily cap and Turnstile back this up.
 PITCH_LIMIT = "3/minute"
 

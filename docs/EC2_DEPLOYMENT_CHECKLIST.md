@@ -172,25 +172,14 @@ docker compose run --rm --entrypoint python api scripts/seed_content.py
 
 ## 8. S3 for admin image uploads
 
-The admin uploads images **straight from the browser to S3** using short-lived presigned POSTs,
-with the keys already in `.env`. In the AWS console, for the bucket in `S3_BUCKET_NAME`:
+The admin uploads images and résumé PDFs **through the API**: the browser sends the file to
+`POST /api/v1/admin/uploads/file`, and the server checks its real type and writes it to S3 with
+the keys already in `.env`. **No bucket CORS rule is needed.** In the AWS console, for the bucket
+in `S3_BUCKET_NAME`:
 
-**a. CORS** (Bucket → Permissions → CORS):
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://aashish-regmi.com.np", "http://localhost:5173"],
-    "AllowedMethods": ["POST"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3000
-  }
-]
-```
-
-(`http://localhost:5173` lets the admin upload from your laptop's dev server; drop it if you
-never do that. Add `https://www.aashish-regmi.com.np` if the site is also served on `www`.)
+**a. Request size on the way in.** Uploads are up to `S3_MAX_UPLOAD_MB` (default 5 MB). If nginx
+sits in front of the app, set `client_max_body_size 6m;` (nginx's default of 1 MB would reject
+larger files with a 413). Cloudflare's limit (100 MB on the free plan) is not an issue.
 
 **b. Public read for the upload folder only.** Either:
 
@@ -213,9 +202,8 @@ never do that. Add `https://www.aashish-regmi.com.np` if the site is also served
 - or *CloudFront* in front of the bucket (keeps the bucket private), then set
   `S3_PUBLIC_BASE_URL=https://<your-distribution>.cloudfront.net`.
 
-Résumé PDFs uploaded in the admin (Profile → Résumé) go to `portfolio/resume/`, so the same
-CORS rule and the same `portfolio/*` public-read policy (or CloudFront) cover them; nothing extra
-to configure.
+Résumé PDFs uploaded in the admin (Résumé tab) go to `portfolio/resume/`, so the same
+`portfolio/*` public-read policy (or CloudFront) covers them; nothing extra to configure.
 
 **c. Permissions of the key in `.env`.** That IAM user needs at least `s3:PutObject`,
 `s3:DeleteObject` and `s3:GetObject` on `arn:aws:s3:::<S3_BUCKET_NAME>/portfolio/*`
