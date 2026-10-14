@@ -173,6 +173,12 @@ Conventions:
   formats in `UPLOAD_RULES`) are read; anything else, including percent-encoded paths, is 404
   before storage is touched. Content-Type comes from the key's extension, never S3 metadata.
   Immutable caching, ETag/304, `nosniff`, `inline`; no `X-Frame-Options` (the résumé is embedded).
+- Contact messages (Phase 6.3): `/admin/messages` (list with `q`/`status`/`unread`, `/stats`,
+  detail, `PATCH {"read"}`, `POST /{id}/retry`, `DELETE`) via `ContactAdminService`
+  (`src/services/contact_admin_service.py`). `read_at` NULL = unread; GET never marks read.
+  Retry atomically moves `failed` -> `pending` (`mark_pending_for_retry`) and reuses
+  `ContactDelivery.deliver` as a background task, like the form; anything else is 409
+  `not_failed`. Audit lines carry the message id, never its body.
 - Résumé download: `GET /api/v1/resume/download` 302s to a presigned S3 GET with an attachment
   disposition (`StorageService.presign_get`, `resume_filename()`), or to an external URL as is;
   404 `resume_unavailable` when unset; `Cache-Control: no-store`.

@@ -25,6 +25,7 @@ class ContactMessage(Base):
             name="status",
         ),
         Index("ix_contact_messages_created_at", "created_at"),
+        Index("ix_contact_messages_read_at", "read_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -36,3 +37,5 @@ class ContactMessage(Base):
     )
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Set when the admin opens the message (Phase 6.3); NULL means unread.
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

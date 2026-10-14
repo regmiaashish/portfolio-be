@@ -256,6 +256,21 @@ starts with `https://api.aashish-regmi.com.np/api/v1/media/`, and the bucket its
 - Security group: 80/443 from Cloudflare only, SSH from your IP only.
 - Keep `/docs` hidden (`ENV=prod`).
 
+## 13. After deploying Phase 6.3 (contact messages in the admin)
+
+Phase 6.3 adds migration `0007_contact_read_at` (a nullable `read_at` column; no data changes).
+With `RUN_MIGRATIONS=false`, run it by hand after pulling:
+
+```bash
+git pull
+sudo docker compose build api
+sudo docker compose run --rm --entrypoint alembic api upgrade head
+sudo docker compose run --rm --entrypoint alembic api current    # expect 0007_contact_read_at (head)
+sudo docker compose up -d
+```
+
+Verify: /admin → Messages lists the contact-form messages, all unread at first.
+
 ## Rollback
 
 - Code: `git switch` back to the previous commit on the VM, then `docker compose up -d --build`.
