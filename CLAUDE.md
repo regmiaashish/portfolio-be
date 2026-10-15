@@ -65,6 +65,13 @@ uv run ruff check src alembic tests && uv run ruff format --check src alembic te
 uv lock --check
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same on every PR, plus migrations on a throwaway
+Postgres 18 (upgrade → `alembic check` → downgrade base → upgrade → the `*_db.py` tests) and a
+Docker build that must start hardened and report healthy. Actions are pinned to commit SHAs;
+Dependabot (`.github/dependabot.yml`) proposes updates weekly. Two pins it doesn't update: the
+CI Postgres service image digest, and the uv image in the Dockerfile's `COPY --from` line,
+which must match `UV_VERSION` in `ci.yml`.
+
 ## Layout and layering
 
 ```
@@ -182,6 +189,34 @@ Conventions:
 - Résumé download: `GET /api/v1/resume/download` 302s to a presigned S3 GET with an attachment
   disposition (`StorageService.presign_get`, `resume_filename()`), or to an external URL as is;
   404 `resume_unavailable` when unset; `Cache-Control: no-store`.
+
+## Production hardening (Phase 7)
+
+- Container: non-root (uid 10001), read-only root filesystem (`/tmp` tmpfs, Gunicorn heartbeat
+  in `/dev/shm`, no control socket), `cap_drop: ALL`, `no-new-privileges`, `HEALTHCHECK` via
+  `scripts/healthcheck.py` (GET `/health`, stdlib only). Base images and uv are pinned by version
+  and digest in the `Dockerfile`; the host port comes from `API_HOST_PORT` (compose only).
+  Nothing may write to the image filesystem at runtime.
+- Security headers: `src/core/security_headers.py` (pure ASGI, outermost middleware) adds
+  `nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and
+  `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`; media gets only
+  `frame-ancestors 'self' <ALLOWED_ORIGINS>` (the résumé is embedded); docs get no CSP only
+  while docs are enabled (never in prod); HSTS in prod. `ALLOWED_ORIGINS` is validated at
+  startup (`scheme://host[:port]` only), since it goes into CORS and this header. `/health` and
+  `/health/ready` also answer `HEAD` (uptime monitors). Routes' own headers win. 500s are sent outside the middleware stack, so
+  `unhandled_exception_handler` adds the same headers itself.
+- Readiness timeout: `HEALTH_READY_TIMEOUT_SECONDS` (default 5; Neon wakes from idle).
+- Error tracking: optional Sentry (`SENTRY_DSN`, `src/core/observability.py`). Never send
+  visitor data: no bodies, cookies, auth/IP headers, query strings or local variables, no log
+  or HTTP breadcrumbs, and IPs/coordinates redacted anywhere in an event (`scrub_event`,
+  `scrub_breadcrumb`). Off in tests (`ENV=test`); a malformed DSN logs a warning instead of
+  stopping the API. Loguru tracebacks also omit variable values (`src/core/logging.py`).
+- Never log a visitor's IP, coordinates or an httpx error's text (it quotes the URL, which can
+  hold them): log `_failure(exc)`-style summaries, and raise user-facing errors `from None`
+  when the cause quotes visitor data.
+- Deploy: `scripts/deploy.sh` on the VM. Monitoring: `docs/MONITORING.md`. Pitch Me go-live:
+  `docs/PITCH_GO_LIVE.md` + `scripts/pitch_golive_check.py` (read-only, no paid calls, never
+  prints secrets; reuses `Settings.pitch_readiness_problems()`).
 
 ## Testing
 

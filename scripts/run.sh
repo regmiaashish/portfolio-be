@@ -19,5 +19,7 @@ exec gunicorn src.main:app \
     --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-30}" \
     --keep-alive "${GUNICORN_KEEPALIVE:-5}" \
     --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
+    --worker-tmp-dir /dev/shm \
+    --no-control-socket \
     --access-logfile - \
     --error-logfile -

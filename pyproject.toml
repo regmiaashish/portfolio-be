@@ -18,6 +18,7 @@ dependencies = [
     "loguru>=0.7.3",
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.15.1",
+    "sentry-sdk[fastapi]>=2.66.0",
     "slowapi>=0.1.10",
     "sqlalchemy>=2.0.51",
     "sse-starlette>=3.5.0",

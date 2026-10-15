@@ -51,6 +51,45 @@ def test_allowed_origins_accepts_json_or_comma_separated(monkeypatch, raw, expec
     assert make_settings().allowed_origins == expected
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://aashish-regmi.com.np,https://www.aashish-regmi.com.np",
+        "http://localhost:5173,http://127.0.0.1:8001,http://localhost:8001",
+    ],
+)
+def test_real_origins_are_accepted(monkeypatch, raw):
+    monkeypatch.setenv("ALLOWED_ORIGINS", raw)
+
+    assert make_settings().allowed_origins == raw.split(",")
+
+
+def test_a_trailing_slash_is_dropped(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example/")
+
+    assert make_settings().allowed_origins == ["https://a.example"]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "*",
+        "https://a.example/path",
+        "a.example",
+        "ftp://a.example",
+        '["https://a.example; script-src *"]',
+        '["https://a.example https://evil.example"]',
+        "https://a.example:999999",
+    ],
+)
+def test_bad_origins_are_rejected(monkeypatch, raw):
+    # These values go into CORS and a Content-Security-Policy header.
+    monkeypatch.setenv("ALLOWED_ORIGINS", raw)
+
+    with pytest.raises(ValidationError, match="ALLOWED_ORIGINS entries"):
+        make_settings()
+
+
 def test_env_defaults_to_prod(without_test_env):
     assert make_settings().env == "prod"
 
@@ -169,3 +208,13 @@ def test_env_example_loads_and_documents_every_setting(monkeypatch):
         if "=" in line and not line.lstrip().startswith("#")
     }
     assert set(Settings.model_fields) <= documented
+
+
+def test_readiness_timeout_defaults_to_five_seconds():
+    assert make_settings().health_ready_timeout_seconds == 5
+
+
+@pytest.mark.parametrize("value", [0.1, 31])
+def test_readiness_timeout_is_bounded(value):
+    with pytest.raises(ValidationError):
+        make_settings(health_ready_timeout_seconds=value)

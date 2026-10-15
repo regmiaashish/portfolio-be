@@ -73,6 +73,14 @@ CURRENCY_SYMBOLS = {
 CONTEXT_UNAVAILABLE = "Visitor context is temporarily unavailable."
 
 
+def _failure(exc: Exception) -> str:
+    """An upstream failure without its text: httpx errors quote the request URL, which holds the
+    visitor's IP (geolocation) or coordinates (weather), and those never go into the logs."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return type(exc).__name__
+
+
 class GeolocationError(Exception):
     """Neither geolocation provider could place the IP."""
 
@@ -172,8 +180,10 @@ class ContextService:
         try:
             geo = await self._geolocation(ip)
         except (GeolocationError, httpx.HTTPError, ValueError) as exc:
-            logger.warning("Geolocation failed for {}: {!r}", ip, exc)
-            raise ServiceUnavailableError(CONTEXT_UNAVAILABLE) from exc
+            logger.warning("Geolocation failed: {}", _failure(exc))
+            # `from None`: the provider error's text holds a URL with the visitor's IP, and the
+            # 503 handler logs this exception's chain.
+            raise ServiceUnavailableError(CONTEXT_UNAVAILABLE) from None
 
         currency_code = geo.get("currency") or BASE_CURRENCY
         weather, conversion_rate = await asyncio.gather(
@@ -211,7 +221,7 @@ class ContextService:
                 }
         except (httpx.HTTPError, ValueError) as exc:
             # ipapi.co rate-limits shared IPs aggressively; the fallback usually works.
-            logger.info("Primary geolocation failed for {}: {!r}", ip, exc)
+            logger.info("Primary geolocation failed: {}", _failure(exc))
 
         if geo is None:
             fallback = await self._get_json(GEOLOCATION_FALLBACK_URL.format(ip=encoded))
@@ -245,7 +255,7 @@ class ContextService:
                 timezone="auto",
             )
         except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Weather lookup failed for {}: {!r}", ip, exc)
+            logger.warning("Weather lookup failed: {}", _failure(exc))
             return None
 
         current = payload.get("current") or {}
@@ -271,7 +281,7 @@ class ContextService:
                 CURRENCY_URL, **{"from": BASE_CURRENCY}, to=currency_code
             )
         except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("FX lookup failed for {}: {!r}", currency_code, exc)
+            logger.warning("FX lookup failed for {}: {}", currency_code, _failure(exc))
             return None
         rate = (payload.get("rates") or {}).get(currency_code)
         if rate is None:

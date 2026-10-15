@@ -183,6 +183,52 @@ async def test_geo_failure_is_503(context_client, providers):
     assert response.json()["message"] == "Visitor context is temporarily unavailable."
 
 
+@pytest.fixture
+def log_lines():
+    """Every log line (with any traceback) the app writes during the test, formatted like the
+    production handler (`configure_logging`: tracebacks without local variable values)."""
+    from loguru import logger
+
+    lines: list[str] = []
+    sink = logger.add(
+        lines.append,
+        format="{message}\n{exception}",
+        level="DEBUG",
+        backtrace=False,
+        diagnose=False,
+    )
+    yield lines
+    logger.remove(sink)
+
+
+@pytest.mark.asyncio
+async def test_failure_logs_never_contain_the_visitor_ip(context_client, providers, log_lines):
+    # httpx errors quote the request URL, which contains the IP; the 503 handler logs the
+    # exception with its chain. Neither may put the visitor's IP into the logs.
+    providers["ipapi"].mock(return_value=httpx.Response(429))
+    providers.get(IPWHO.format(ip="8.8.8.8")).mock(return_value=httpx.Response(500))
+
+    response = context_client.get(URL, params={"ip": "8.8.8.8"})
+
+    assert response.status_code == 503
+    logged = "".join(log_lines)
+    assert "Geolocation failed: HTTP 500" in logged
+    assert "8.8.8.8" not in logged
+
+
+@pytest.mark.asyncio
+async def test_weather_failure_logs_never_contain_coordinates(context_client, providers, log_lines):
+    providers["weather"].mock(return_value=httpx.Response(500))
+
+    response = context_client.get(URL, params={"ip": "8.8.8.8"})
+
+    assert response.status_code == 200
+    logged = "".join(log_lines)
+    assert "Weather lookup failed: HTTP 500" in logged
+    assert "37.4" not in logged and "-122.1" not in logged
+    assert "8.8.8.8" not in logged
+
+
 @pytest.mark.asyncio
 async def test_weather_failure_still_200(context_client, providers):
     providers["weather"].mock(return_value=httpx.Response(500))

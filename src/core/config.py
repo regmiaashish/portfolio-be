@@ -1,9 +1,15 @@
 import json
+import re
 from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import Field, IPvAnyNetwork, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# scheme://host[:port], exactly what browsers send in the Origin header. These values also go
+# into CORS and a Content-Security-Policy header, so anything else (paths, "*", spaces, ";")
+# is rejected at startup rather than silently widening a policy.
+_ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(?::\d{1,5})?")
 
 MIN_PROD_JWT_SECRET_LENGTH = 32
 
@@ -30,6 +36,9 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: SecretStr
+    # How long GET /health/ready waits for `SELECT 1`. Generous by default: a serverless
+    # database (Neon) can take a few seconds to wake from idle.
+    health_ready_timeout_seconds: float = Field(default=5, ge=0.5, le=30)
 
     # --- CORS ---
     # NoDecode: accept a JSON list or a comma-separated string (see split_origins).
@@ -96,6 +105,13 @@ class Settings(BaseSettings):
     # Hard ceiling on one run, end to end.
     pitch_timeout_seconds: float = Field(default=45, gt=0)
 
+    # --- Error tracking (optional) ---
+    # Empty DSN = Sentry off. See src/core/observability.py for what is (not) sent.
+    sentry_dsn: SecretStr = SecretStr("")
+    # Empty = use ENV.
+    sentry_environment: str = ""
+    sentry_traces_sample_rate: float = Field(default=0, ge=0, le=1)
+
     # --- Image uploads (content admin) ---
     # Same names as the server's existing .env. All optional: an empty bucket disables uploads.
     aws_access_key_id: str = ""
@@ -142,6 +158,19 @@ class Settings(BaseSettings):
                 return [str(origin).strip() for origin in parsed]
         return value
 
+    @field_validator("allowed_origins")
+    @classmethod
+    def check_origins(cls, value: list[str]) -> list[str]:
+        # A trailing slash is a common copy-paste slip; browsers never send one.
+        origins = [origin.rstrip("/") for origin in value]
+        invalid = [origin for origin in origins if not _ORIGIN.fullmatch(origin)]
+        if invalid:
+            raise ValueError(
+                "ALLOWED_ORIGINS entries must look like https://example.com or "
+                f"http://localhost:5173 (no path or wildcard); got {invalid}"
+            )
+        return origins
+
     @field_validator("trusted_proxy_ips", mode="before")
     @classmethod
     def split_proxies(cls, value: object) -> object:
@@ -176,8 +205,11 @@ class Settings(BaseSettings):
             self._check_pitch_ready()
         return self
 
-    def _check_pitch_ready(self) -> None:
-        """Pitch Me spends money on every run: refuse to enable it half-configured in prod."""
+    def pitch_readiness_problems(self) -> list[str]:
+        """Why Pitch Me isn't safe to run with real money in prod (empty = ready).
+
+        Names settings only, never their values. Also used by scripts/pitch_golive_check.py.
+        """
         problems = []
         if not self.turnstile_secret.get_secret_value():
             problems.append("TURNSTILE_SECRET is required (bot protection)")
@@ -187,7 +219,11 @@ class Settings(BaseSettings):
             problems.append("GEMINI_API_KEY is required for PITCH_LLM_PROVIDER=gemini")
         if self.pitch_research_provider == "tavily" and not self.tavily_api_key.get_secret_value():
             problems.append("TAVILY_API_KEY is required for PITCH_RESEARCH_PROVIDER=tavily")
-        if problems:
+        return problems
+
+    def _check_pitch_ready(self) -> None:
+        """Pitch Me spends money on every run: refuse to enable it half-configured in prod."""
+        if problems := self.pitch_readiness_problems():
             raise ValueError(
                 "PITCH_ENABLED=true with ENV=prod, but Pitch Me is not safe to run: "
                 + "; ".join(problems)

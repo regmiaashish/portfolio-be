@@ -71,7 +71,11 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.opt(exception=exc).error("Unhandled error on {} {}", request.method, request.url.path)
-    return error_response(500, "Internal server error.")
+    # This response is sent from outside the middleware stack (Starlette's
+    # ServerErrorMiddleware), so the security headers are added here.
+    policy = getattr(request.app.state, "security_headers", None)
+    headers = policy.for_path(request.url.path) if policy is not None else None
+    return error_response(500, "Internal server error.", headers=headers)
 
 
 def register_exception_handlers(app: FastAPI) -> None:

@@ -325,26 +325,29 @@ src/
 
 ## Phase 6: Quality gate and launch
 
+> Delivered as **"Phase 7"** in the repos (the 6.1–6.3 branch names were used for admin features).
+> Backend status below; frontend items are tracked in the frontend repo.
+
 ### 6.1 Tests
-- [ ] Backend (pytest + httpx `AsyncClient` + `respx`): contact validation and escaping, context with mocked providers, auth cycle, **regression test that `register` cannot escalate**, pitch graph with a fake LLM and mocked Tavily (CI never spends money)
+- [x] Backend (pytest + httpx `AsyncClient` + `respx`): contact validation and escaping, context with mocked providers, auth cycle, **regression test that `register` cannot escalate**, pitch graph with a fake LLM and mocked Tavily (CI never spends money)
 - [ ] Frontend (Vitest + Testing Library): `Contact` states, `useVisitorContext` fallbacks, `usePitchStream` closes on `done`/`error`
 - [ ] Playwright smoke test: page loads, hero resolves, form submits against a mock API
 
 ### 6.2 CI/CD
-- [ ] Backend: `ruff` → `pytest` → build image → migrate → deploy
+- [x] Backend: `ruff` → `pytest` → build image → migrate (GitHub Actions); deploy is `scripts/deploy.sh` on the VM
 - [ ] Frontend: `npm ci` → `lint` → `typecheck` → `test` → `build` → `wrangler deploy`
-- [ ] Dependabot or Renovate for both repos
+- [x] Dependabot or Renovate for both repos (backend: uv, docker, github-actions)
 
 ### 6.3 Production hardening
 - [ ] Security headers via `_headers` (CSP allowing only your API, Turnstile and fonts; `X-Content-Type-Options`; `Referrer-Policy`; `Permissions-Policy`) (F-SEC-4)
-- [ ] CORS restricted to your exact origins
-- [ ] Non-root Docker user, pinned `uv`, `HEALTHCHECK` (B-OPS-4/5)
-- [ ] Uptime monitor on `/health/ready`; error tracking (e.g. Sentry free tier)
+- [x] CORS restricted to your exact origins (`ALLOWED_ORIGINS`); API security headers + CSP in `src/core/security_headers.py`
+- [x] Non-root Docker user, pinned `uv`, `HEALTHCHECK` (B-OPS-4/5), read-only filesystem, no capabilities
+- [x] Uptime monitor on `/health/ready`; error tracking (e.g. Sentry free tier): code + `docs/MONITORING.md`; the accounts are set up by hand
 - [ ] Redis-backed rate limiting if you ever run more than one host (B-OPS-6)
 
 ### 6.4 Launch checklist
 - [ ] All Phase 0 items verified in production
-- [ ] `pitch_enabled=True` only after the cost controls are confirmed
+- [ ] `pitch_enabled=True` only after the cost controls are confirmed (runbook: `docs/PITCH_GO_LIVE.md`, check: `scripts/pitch_golive_check.py`)
 - [ ] Spending alerts set on Gemini, Tavily and any SMTP provider
 - [ ] Test on a real phone over mobile data
 - [ ] Share the link and watch logs for the first 48 hours

@@ -6,6 +6,23 @@ services:
     container_name: portfolio-server
     restart: always
     ports:
-      - "8001:8001"
+      # Host port from API_HOST_PORT in .env (the EC2 VM behind Cloudflare uses 80).
+      - "${API_HOST_PORT:-8001}:8001"
     env_file:
       - .env
+    # Least privilege: no root (set in the Dockerfile), no Linux capabilities, no setuid
+    # escalation, and a read-only filesystem apart from scratch space.
+    read_only: true
+    tmpfs:
+      # RAM-backed scratch space, capped. Uploads over 1 MB are spooled here while being read
+      # (max S3_MAX_UPLOAD_MB, 5 MB by default, admin only); tavily's tokenizer cache is ~2 MB.
+      - /tmp:size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
