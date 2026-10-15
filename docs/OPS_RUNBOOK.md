@@ -437,28 +437,12 @@ on port 80, so the last hop is unencrypted. **Full (strict)** encrypts that hop 
 origin's certificate. That needs the VM to serve HTTPS itself, on port 443, with a certificate
 Cloudflare trusts.
 
-> **Don't switch the SSL mode in the dashboard yet.** Switching before the VM serves HTTPS breaks
-> the API immediately: Cloudflare returns **525** (SSL handshake failed) or **526** (invalid
-> certificate). The server-side part (TLS on the origin, port 443, and security group rules for
-> Cloudflare's ranges on 443) will come as a separate code change with its own steps.
-
-What you can prepare now:
-
-1. **Origin certificate:** Cloudflare → SSL/TLS → **Origin Server** → **Create Certificate**
-   → "Generate private key and CSR with Cloudflare", RSA 2048, hostnames
-   `api.aashish-regmi.com.np`, validity **15 years** → Create.
-2. Store the certificate and key on the VM, readable only by root. The key is shown once:
-
-   ```bash
-   sudo install -d -m 700 /etc/ssl/cloudflare
-   sudo nano /etc/ssl/cloudflare/api-origin.pem      # paste the certificate, save
-   sudo nano /etc/ssl/cloudflare/api-origin.key      # paste the private key, save
-   sudo chmod 600 /etc/ssl/cloudflare/api-origin.*
-   sudo openssl x509 -in /etc/ssl/cloudflare/api-origin.pem -noout -subject -enddate
-   ```
-
-   The certificate is only trusted by Cloudflare, not by browsers. That's fine, because only
-   Cloudflare connects to the origin.
+> **Don't switch the SSL mode in the dashboard on its own.** Switching before the VM serves
+> HTTPS breaks the API immediately: Cloudflare returns **525** (SSL handshake failed) or **526**
+> (invalid certificate). Phase 8 added TLS on the origin; the full, ordered procedure
+> (origin certificate, file permissions, security group rules for 443, the cutover with a
+> per-host Configuration Rule, rollback, and later the zone-wide switch) is in
+> **`docs/ORIGIN_TLS.md`**. Follow that instead of changing the mode here.
 
 Things that are safe to turn on now (Cloudflare → SSL/TLS → **Edge Certificates**):
 

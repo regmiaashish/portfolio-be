@@ -362,14 +362,8 @@ sudo docker compose up -d --build --force-recreate
 `API_HOST_PORT` in `.env` is harmless for the old code (unknown keys are ignored). Return to
 `main` later with `git checkout -- docker-compose.yaml && git switch main`.
 
-**Later deploys** are one command. It refuses to run if `API_HOST_PORT` isn't a port number in
-`.env` or a tracked file was edited on the VM, checks the published port before restarting,
-waits up to 90 s for `healthy`, smoke-tests `/health` and `/health/ready`, and prints the
-rollback commands (including an `alembic downgrade` when it migrated) if anything fails:
-
-```bash
-cd ~/portfolio-be && scripts/deploy.sh
-```
+**Later deploys** are one command, `scripts/deploy.sh`. Since Phase 8 it pulls the image CI
+published instead of building on the VM: see section 15.
 
 Then, when you have time:
 
@@ -383,8 +377,141 @@ Then, when you have time:
   you update uv, change it there and `UV_VERSION` in `.github/workflows/ci.yml` together.
 - Pitch Me: `docs/PITCH_GO_LIVE.md` (replaces step 10 above).
 
+## 15. Deploying Phase 8 (images from GHCR; the VM stops building)
+
+Since Phase 8, CI builds the API image for `linux/amd64` and `linux/arm64` after every check
+passes on `main`, starts each one hardened and smoke-tests it, and publishes it as
+`ghcr.io/regmiaashish/portfolio-be:sha-<first 7 characters of the commit>` (plus a moving `main`
+tag that only ever moves forward). The VM only pulls it: no more memory-heavy builds on a 1 GB
+machine, deploys take seconds, and a rollback is a switch to an older tag. `API_IMAGE` in `.env`
+says which image runs. The production VM is **x86_64**, so it runs the `linux/amd64` image.
+
+**Never run `docker compose up --build` (or `docker compose build`) on the VM.** With `API_IMAGE`
+set, compose would tag a local build with the CI image's name, and you could no longer tell
+them apart. Use `scripts/deploy.sh --build-local` if you ever really need to build there.
+
+### First time
+
+**1. Wait for the first publish.** After the Phase 8 PR is merged, GitHub → the repo →
+*Actions* → the run for the merge commit: *Publish multi-arch image* must be green (about
+5–10 minutes after the merge). Before that, pulls fail with "denied", because the package
+doesn't exist yet.
+
+**2. Let the VM pull it.** The image contains no secrets (`.dockerignore` excludes every `.env`
+file, certificates and keys) and the repository is public, so the simplest option is a public
+package:
+
+- **Recommended: make the package public.** GitHub → your profile → *Packages* →
+  `portfolio-be` → *Package settings* → *Danger Zone* → *Change visibility* → **Public**.
+  The VM then pulls without any credentials.
+- **Or keep it private** and log the VM in once. Create a **classic** personal access token
+  with only the `read:packages` scope and an expiry date (GitHub → *Settings* → *Developer
+  settings* → *Personal access tokens* → *Tokens (classic)*). Then on the VM:
+
+  ```bash
+  read -rsp "GHCR token (read:packages): " T; echo
+  printf '%s' "$T" | sudo docker login ghcr.io -u regmiaashish --password-stdin; unset T
+  ```
+
+  Docker stores it in `/root/.docker/config.json`. Renew it before it expires, or deploys stop
+  with `the registry refused …`.
+
+**3. Check the VM's architecture is in the image** (both are published, this just confirms):
+
+```bash
+uname -m                      # x86_64 on this VM
+sudo docker manifest inspect ghcr.io/regmiaashish/portfolio-be:main | grep -E '"architecture"'
+```
+
+**4. Prepare.** Back up `.env` **outside** the repository, and check the readiness timeout:
+
+```bash
+cd ~/portfolio-be && cp .env ~/env.backup-before-phase8
+grep '^HEALTH_READY_TIMEOUT_SECONDS' .env    # nothing, or 10
+```
+
+If it prints `HEALTH_READY_TIMEOUT_SECONDS=5` (Phase 7's example value), raise it, because Neon
+can take longer than 5 s to wake up (the value isn't a secret):
+
+```bash
+set_env() { [ -z "$(tail -c1 .env)" ] || echo >> .env; sed -i "/^$1=/d" .env; printf '%s=%s\n' "$1" "$2" >> .env; }
+set_env HEALTH_READY_TIMEOUT_SECONDS 10
+```
+
+**5. Deploy.** Pull first, so the new `deploy.sh` runs (the old one would build on the VM):
+
+```bash
+cd ~/portfolio-be && git pull --ff-only && scripts/deploy.sh
+```
+
+It prints `==> Pulling ghcr.io/regmiaashish/portfolio-be:sha-…`, checks the new image, migrates,
+switches `API_IMAGE`, recreates, waits for `healthy`, smoke-tests and ends with
+`==> Deployed …`. The Phase 7 build that was running is kept as
+`portfolio-be-api:pre-<image id>` (printed at the end), so going back to it is exact.
+`.env` now contains `API_IMAGE=ghcr.io/regmiaashish/portfolio-be:sha-…`.
+
+**6. Free the disk** (about a week later, after at least one more successful deploy): the
+locally built images from Phase 7 aren't needed any more.
+
+```bash
+sudo docker image rm portfolio-be-api:rollback portfolio-be-api:latest 2>/dev/null; sudo docker image prune -f
+```
+
+### Every deploy after that
+
+Merge on GitHub, wait until *Publish multi-arch image* is green, then on the VM:
+
+```bash
+cd ~/portfolio-be && scripts/deploy.sh
+```
+
+If CI hasn't finished publishing the merge yet, it says `not published yet` and retries every
+30 s for up to 10 minutes. It refuses to run when another deploy is running, when
+`API_HOST_PORT` isn't a port number in `.env`, or when a tracked file was edited on the VM. Before
+changing anything it checks, **with the new image**: the compose configuration (image, port,
+and the TLS mount when TLS is on), that the TLS certificate and key load (when TLS is on), and
+that `alembic current` works. Then it migrates and switches. It keeps the three newest images of
+each kind and never removes the running one or the rollback image.
+
+Other modes:
+
+- `scripts/deploy.sh sha-1a2b3c4`: deploy a specific published image. It still runs `git pull`
+  first, so the compose file and scripts come from the latest `main`.
+- `scripts/deploy.sh --no-pull`: redeploy the image already in `.env` with the current checkout
+  and `.env`, without pulling anything. For configuration-only changes (for example the TLS
+  cutover in `docs/ORIGIN_TLS.md`); still checked, health-checked and smoke-tested.
+- `scripts/deploy.sh --build-local`: build on the VM (fallback; needs the swap file, takes
+  minutes).
+
+### Rollback
+
+- **Automatic:** if the new container doesn't become healthy, or `/health` or `/health/ready`
+  fail the smoke test, `deploy.sh` switches `API_IMAGE` back to the exact image that was running
+  and recreates the container. If the deploy also migrated the database, it prints the downgrade
+  command, which runs with the **new** image (only it knows the new revision):
+
+  ```bash
+  sudo env API_IMAGE=ghcr.io/regmiaashish/portfolio-be:sha-<new> docker compose run --rm --entrypoint alembic api downgrade <previous revision>
+  ```
+
+  Run it only if the old image can't work with the new schema.
+- **By hand, to any published version:** `scripts/deploy.sh sha-1a2b3c4` (tags: GitHub →
+  *Packages* → `portfolio-be`). The end of every successful deploy prints the tag to go back to.
+  If a migration ran since that version, downgrade first with the command above.
+- **Back to a kept local image** (`portfolio-be-api:pre-…`, printed by the deploy): set
+  `API_IMAGE` to it with `set_env`, then `scripts/deploy.sh --no-pull`.
+- **Last resort,** if `deploy.sh` itself can't run: `cp ~/env.backup-before-phase8 .env`, then
+  `sudo docker compose up -d --no-build --force-recreate api`.
+
+### Origin TLS (optional, next)
+
+To encrypt the Cloudflare → VM hop and move to SSL **Full (strict)**, follow
+`docs/ORIGIN_TLS.md`.
+
 ## Rollback
 
-- Code: `git switch` back to the previous commit on the VM, then `docker compose up -d --build`.
-- Database: `docker compose run --rm --entrypoint alembic api downgrade <revision>` for the newest
-  steps, or restore the Neon branch from step 2.
+- Code (Phase 8 and later): `scripts/deploy.sh sha-<older commit>`; see section 15. Don't build
+  on the VM with `docker compose up --build`.
+- Database: run the downgrade with the image that knows the newest revision, for example
+  `sudo env API_IMAGE=<that image> docker compose run --rm --entrypoint alembic api downgrade <revision>`,
+  or restore the Neon branch from step 2.

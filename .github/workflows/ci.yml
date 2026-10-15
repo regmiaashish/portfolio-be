@@ -1,5 +1,7 @@
-# Checks every pull request and every push to main. Nothing here deploys or uses secrets:
-# all settings are dummy values, the database is a throwaway service container.
+# Checks every pull request and every push to main. Settings are dummy values and the database
+# is a throwaway service container. Only a push to main, after every check has passed, publishes
+# the image to ghcr.io/regmiaashish/portfolio-be (the VM pulls it; nothing here deploys). Pull
+# requests, Dependabot included, never get package write access.
 name: CI
 
 on:
@@ -11,8 +13,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Cancel superseded PR runs only; every push to main gets a complete run.
+  # Pull requests: one group per PR, and a newer push cancels the older run.
+  # Pushes to main: one group per run. A shared group would let GitHub drop a run that is still
+  # waiting when a third push arrives, and that commit would never get its sha-<commit> image.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -122,32 +126,158 @@ jobs:
           persist-credentials: false
       - name: Build
         run: docker build -t portfolio-api:ci .
-      - name: Runs as a non-root user
-        run: test "$(docker run --rm --entrypoint id portfolio-api:ci -u)" != "0"
-      - name: Starts with production hardening and becomes healthy
+      # Started the way production runs it (read-only, no capabilities, non-root, dummy settings,
+      # no database): must report healthy, answer /health with the security headers, run as 10001.
+      - name: Starts hardened, healthy, non-root, with security headers
+        run: scripts/ci_smoke_image.sh portfolio-api:ci
+
+  # --- Publish (push to main only, after every check above passed) -------------------------
+  # Each architecture is built natively on its own runner (no QEMU), pushed by digest, and then
+  # started and smoke-tested on that runner before its digest is handed on. The next job joins
+  # the digests into one multi-arch image tagged sha-<7-char commit> (immutable: what
+  # scripts/deploy.sh pulls) and, only if the commit is still the tip of main, main (moving).
+  # The production VM is x86_64 (linux/amd64); arm64 is published too, for Graviton instances.
+  publish-build:
+    name: Build image (${{ matrix.platform }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, test, migrations, docker]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image name (registry names must be lowercase)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Name for this platform's cache and artifact
+        id: platform
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: echo "pair=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+      - name: Labels (source repo, revision, created, description)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          labels: |
+            org.opencontainers.image.description=Backend API for aashish-regmi.com.np (FastAPI)
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          # The action also uploads a build-record artifact; nothing reads it, keep it a day.
+          DOCKER_BUILD_RECORD_RETENTION_DAYS: 1
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ steps.platform.outputs.pair }}
+          cache-to: type=gha,mode=max,scope=${{ steps.platform.outputs.pair }}
+      # The exact image just pushed (by digest), on its own architecture's runner. A failure here
+      # stops the digest from being handed on, so nothing gets tagged.
+      - name: Smoke-test the pushed image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          docker run -d --name api -p 127.0.0.1:8001:8001 \
-            --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
-            -e ENV=prod \
-            -e DATABASE_URL=postgresql+asyncpg://nobody:nobody@127.0.0.1:1/none \
-            -e SMTP_HOST=localhost -e SMTP_USER=ci@example.com -e SMTP_PASSWORD=dummy \
-            -e SUPER_ADMIN_EMAIL=ci@example.com -e PORTFOLIO_URL=https://example.com \
-            -e GITHUB_URL=https://github.com/example -e LINKEDIN_URL=https://linkedin.com/in/example \
-            -e JWT_SECRET_KEY=ci-dummy-secret-key-that-is-long-enough-123456 \
-            portfolio-api:ci
-          for _ in $(seq 30); do
-            status="$(docker inspect -f '{{.State.Health.Status}}' api)"
-            [ "$status" = healthy ] && break
-            sleep 2
-          done
-          docker logs api
-          test "$status" = healthy
-      - name: Liveness and security headers
+          docker pull "$IMAGE@$DIGEST"
+          scripts/ci_smoke_image.sh "$IMAGE@$DIGEST"
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          curl -fsS -D headers.txt http://127.0.0.1:8001/health
-          grep -qi '^x-content-type-options: nosniff' headers.txt
-          grep -qi "^content-security-policy: default-src 'none'" headers.txt
-          grep -qi '^strict-transport-security:' headers.txt
-      - name: Clean up
-        if: always()
-        run: docker rm -f api || true
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ steps.platform.outputs.pair }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish multi-arch image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Image name (registry names must be lowercase)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      # main moves only forward: an older run finishing late must not point it back. Every run
+      # still publishes its own sha-<commit> tag.
+      - name: Is this commit still the tip of main?
+        id: tip
+        run: |
+          tip="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}" refs/heads/main | cut -f1)"
+          if [ "$tip" = "$GITHUB_SHA" ]; then latest=true; else latest=false; fi
+          echo "main is at ${tip:-?}; this run is $GITHUB_SHA; tag main: $latest"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Tags and index annotations
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # Annotations on the multi-arch index: GHCR shows the package description from there.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+        with:
+          images: ${{ env.IMAGE }}
+          # sha-<first 7 characters of the commit>: scripts/deploy.sh derives the same tag from
+          # `git rev-parse HEAD | cut -c1-7` on the VM.
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=main,enable=${{ steps.tip.outputs.latest == 'true' }}
+          annotations: |
+            org.opencontainers.image.description=Backend API for aashish-regmi.com.np (FastAPI)
+      - name: Create the multi-arch image from the per-platform digests
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          args=()
+          while read -r tag; do args+=(-t "$tag"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          while read -r annotation; do args+=(--annotation "$annotation"); done \
+            < <(jq -r '.annotations[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          for digest in *; do args+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${args[@]}"
+      - name: Check the tags exist with both architectures
+        env:
+          LATEST: ${{ steps.tip.outputs.latest }}
+        run: |
+          expected=1
+          [ "$LATEST" = true ] && expected=2
+          count="$(jq '.tags | length' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          [ "$count" -eq "$expected" ] || { echo "expected $expected tag(s), got $count" >&2; exit 1; }
+          while read -r tag; do
+            docker buildx imagetools inspect "$tag" | tee manifest.txt
+            grep -q "linux/amd64" manifest.txt
+            grep -q "linux/arm64" manifest.txt
+          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")

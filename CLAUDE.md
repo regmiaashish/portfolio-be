@@ -67,7 +67,12 @@ uv lock --check
 
 CI (`.github/workflows/ci.yml`) runs the same on every PR, plus migrations on a throwaway
 Postgres 18 (upgrade → `alembic check` → downgrade base → upgrade → the `*_db.py` tests) and a
-Docker build that must start hardened and report healthy. Actions are pinned to commit SHAs;
+Docker build that must start hardened and report healthy (`scripts/ci_smoke_image.sh`). On a
+push to `main`, once all of those pass, the publish jobs build the image natively for
+`linux/amd64` (the VM is x86_64) and `linux/arm64`, smoke-test each pushed digest on its own
+runner, and push one multi-arch image to `ghcr.io/regmiaashish/portfolio-be` tagged
+`sha-<7-char commit>` (immutable, what the VM deploys) and `main` (only if the commit is still the
+tip of `main`). Every push to `main` gets its own CI run; PRs never publish. Actions are pinned to commit SHAs;
 Dependabot (`.github/dependabot.yml`) proposes updates weekly. Two pins it doesn't update: the
 CI Postgres service image digest, and the uv image in the Dockerfile's `COPY --from` line,
 which must match `UV_VERSION` in `ci.yml`.
@@ -205,7 +210,7 @@ Conventions:
   startup (`scheme://host[:port]` only), since it goes into CORS and this header. `/health` and
   `/health/ready` also answer `HEAD` (uptime monitors). Routes' own headers win. 500s are sent outside the middleware stack, so
   `unhandled_exception_handler` adds the same headers itself.
-- Readiness timeout: `HEALTH_READY_TIMEOUT_SECONDS` (default 5; Neon wakes from idle).
+- Readiness timeout: `HEALTH_READY_TIMEOUT_SECONDS` (default 10; Neon wakes from idle).
 - Error tracking: optional Sentry (`SENTRY_DSN`, `src/core/observability.py`). Never send
   visitor data: no bodies, cookies, auth/IP headers, query strings or local variables, no log
   or HTTP breadcrumbs, and IPs/coordinates redacted anywhere in an event (`scrub_event`,
@@ -214,7 +219,25 @@ Conventions:
 - Never log a visitor's IP, coordinates or an httpx error's text (it quotes the URL, which can
   hold them): log `_failure(exc)`-style summaries, and raise user-facing errors `from None`
   when the cause quotes visitor data.
-- Deploy: `scripts/deploy.sh` on the VM. Monitoring: `docs/MONITORING.md`. Pitch Me go-live:
+- Deploy (Phase 8): the VM never builds (never `docker compose up --build` there). One deploy at a
+  time (`flock`). `scripts/deploy.sh` pulls `ghcr.io/regmiaashish/portfolio-be:sha-<commit>`
+  (waits if CI hasn't published it yet), then, **before changing anything**, checks with the new
+  image (`env API_IMAGE=<new> docker compose …`): compose config, the TLS mount and that the
+  certificate/key load (when TLS is on), `alembic current`, then migrates. Only then it points
+  `API_IMAGE` in `.env` at it (compose: `image: ${API_IMAGE:-portfolio-be-api:latest}`),
+  recreates, waits for healthy and smoke-tests; on failure it switches back to the exact previous
+  image (by ID: a GHCR `sha-` tag, or a `portfolio-be-api:pre-<id>` tag it creates). Downgrade
+  hints run with the new image (only it knows the new revision). `scripts/deploy.sh sha-<old>`
+  rolls back; `--no-pull` redeploys the current image for configuration-only changes;
+  `--build-local` is the fallback. Test changes to it with fake docker/sudo/curl shims, never on
+  the VM.
+- Origin TLS (Phase 8): with `TLS_CERT_FILE` and `TLS_KEY_FILE` set, `scripts/run.sh` makes
+  Gunicorn serve HTTPS on 8001 (it's either HTTP or HTTPS; Gunicorn applies TLS to every bind);
+  `docker-compose.tls.yaml` (added via `COMPOSE_FILE`) mounts `/etc/portfolio-tls` read-only at
+  `/run/tls`; the key must be readable by gid 10001. The health check and `deploy.sh` switch to
+  HTTPS on their own. Cutover steps: `docs/ORIGIN_TLS.md`.
+- Monitoring: `docs/MONITORING.md`. Uptime checks hit `/health` (no database); `/health/ready`
+  at most hourly, because frequent DB pings keep Neon's free compute awake. Pitch Me go-live:
   `docs/PITCH_GO_LIVE.md` + `scripts/pitch_golive_check.py` (read-only, no paid calls, never
   prints secrets; reuses `Settings.pitch_readiness_problems()`).
 

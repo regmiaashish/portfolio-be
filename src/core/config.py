@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     database_url: SecretStr
     # How long GET /health/ready waits for `SELECT 1`. Generous by default: a serverless
     # database (Neon) can take a few seconds to wake from idle.
-    health_ready_timeout_seconds: float = Field(default=5, ge=0.5, le=30)
+    health_ready_timeout_seconds: float = Field(default=10, ge=0.5, le=30)
 
     # --- CORS ---
     # NoDecode: accept a JSON list or a comma-separated string (see split_origins).

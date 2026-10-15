@@ -1,0 +1,13 @@
+# TLS on the origin (docs/ORIGIN_TLS.md). Added on top of docker-compose.yaml by setting, in .env:
+#
+#   COMPOSE_FILE=docker-compose.yaml:docker-compose.tls.yaml
+#   TLS_CERT_FILE=/run/tls/origin.pem
+#   TLS_KEY_FILE=/run/tls/origin.key
+#   API_HOST_PORT=443
+#
+# The certificate and key stay on the host, outside the repository, readable by the container's
+# user (uid/gid 10001), and are mounted read-only.
+services:
+  api:
+    volumes:
+      - ${TLS_HOST_DIR:-/etc/portfolio-tls}:/run/tls:ro

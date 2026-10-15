@@ -17,6 +17,10 @@ dist
 build
 Dockerfile*
 docker-compose.yml
-docker-compose.yaml
+docker-compose*.yaml
 tests
 docs
+.github
+# Certificates and keys never belong in the image (origin TLS files live in /etc/portfolio-tls).
+**/*.pem
+**/*.key

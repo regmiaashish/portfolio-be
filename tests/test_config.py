@@ -210,8 +210,9 @@ def test_env_example_loads_and_documents_every_setting(monkeypatch):
     assert set(Settings.model_fields) <= documented
 
 
-def test_readiness_timeout_defaults_to_five_seconds():
-    assert make_settings().health_ready_timeout_seconds == 5
+def test_readiness_timeout_defaults_to_ten_seconds():
+    # Neon cold starts have exceeded 5 s in production.
+    assert make_settings().health_ready_timeout_seconds == 10
 
 
 @pytest.mark.parametrize("value", [0.1, 31])
