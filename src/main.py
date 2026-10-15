@@ -10,7 +10,9 @@ from src.core.config import Settings, settings
 from src.core.database import AsyncSessionLocal
 from src.core.error_handlers import register_exception_handlers
 from src.core.logging import configure_logging
+from src.core.observability import init_sentry
 from src.core.rate_limit import limiter
+from src.core.security_headers import SecurityHeaderPolicy, SecurityHeadersMiddleware
 from src.services.context_service import ContextService
 from src.services.pitch.history import DbPitchRecorder
 from src.services.pitch.stream import PitchCache
@@ -19,6 +21,7 @@ from src.services.storage_service import create_storage
 OUTBOUND_TIMEOUT = httpx.Timeout(6.0, connect=3.0)
 
 configure_logging()
+init_sentry(settings)
 
 
 @asynccontextmanager
@@ -53,6 +56,13 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
     )
 
     app.state.limiter = limiter
+    # Also read by the 500 handler: Starlette sends unhandled-error responses from outside
+    # the user middleware stack, so they would otherwise miss these headers.
+    app.state.security_headers = SecurityHeaderPolicy(
+        frame_origins=app_settings.allowed_origins,
+        hsts=app_settings.is_prod,
+        docs_enabled=docs_enabled,
+    )
     register_exception_handlers(app)
     app.include_router(api_router)
 
@@ -63,6 +73,8 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Outermost, so CORS preflights and error responses get the headers too.
+    app.add_middleware(SecurityHeadersMiddleware, policy=app.state.security_headers)
     return app
 
 

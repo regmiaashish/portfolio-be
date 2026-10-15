@@ -222,6 +222,9 @@ starts with `https://api.aashish-regmi.com.np/api/v1/media/`, and the bucket its
 
 ## 10. Turn on Pitch Me (costs money per run, so last)
 
+> Superseded by **`docs/PITCH_GO_LIVE.md`** (Phase 7.4), which has the exact commands, the
+> Turnstile order and a free pre-flight check. The notes below are kept for reference.
+
 1. Gemini: free key from Google AI Studio → `GEMINI_API_KEY`. Set a quota or budget limit in the
    Google Cloud console. (The free tier may use prompts to improve Google's models; this demo only
    sends company and role names plus public web snippets.)
@@ -270,6 +273,115 @@ sudo docker compose up -d
 ```
 
 Verify: /admin → Messages lists the contact-form messages, all unread at first.
+
+## 14. Deploying Phase 7 (hardened container, CI, monitoring)
+
+Phase 7 changes how the container runs: as a non-root user (uid 10001), on a read-only
+filesystem, with no Linux capabilities and a Docker `HEALTHCHECK`. It also moves the host port
+out of `docker-compose.yaml` into `.env` (`API_HOST_PORT`), so the VM no longer needs a local
+edit to that file. No database migration.
+
+Do these **in this order**, one block at a time, and stop at the first check that doesn't match.
+The live container keeps serving until step 6.
+
+**1. Check where you are and back up `.env`.**
+
+```bash
+cd ~/portfolio-be
+git status --short          # expect only:  M docker-compose.yaml   (the local "80:8001" edit)
+git log -1 --oneline        # expect c9e5314 (Phase 6.3), or a later main commit
+PREV=$(git rev-parse --short HEAD); echo "rollback commit: $PREV"
+cp .env ".env.backup-before-phase7"
+```
+
+**2. Put the port into `.env` (Cloudflare connects to port 80).** The helper first adds a
+missing final newline, so the new line can't be glued onto the last setting.
+
+```bash
+set_env() { [ -z "$(tail -c1 .env)" ] || echo >> .env; sed -i "/^$1=/d" .env; printf '%s=%s\n' "$1" "$2" >> .env; }
+set_env API_HOST_PORT 80
+grep -c '^API_HOST_PORT=80$' .env            # must print 1
+```
+
+**3. Drop the local compose edit and pull.**
+
+```bash
+git checkout -- docker-compose.yaml && git pull --ff-only
+```
+
+**4. Before anything restarts, confirm compose will publish port 80.**
+
+```bash
+sudo docker compose config | grep -A4 ports   # must show: published: "80"
+```
+
+If it shows `"8001"`, `API_HOST_PORT` didn't land in `.env`: fix step 2 before continuing.
+
+**5. Build, then rehearse with the new image (the live container is untouched).**
+
+```bash
+sudo docker compose build api
+sudo docker compose run --rm --entrypoint python api -c "import src.main; print('settings OK')"
+sudo docker compose run --rm --entrypoint alembic api current    # 0007_contact_read_at (head)
+```
+
+`settings OK` proves the new code accepts your `.env` (Phase 7 validates `ALLOWED_ORIGINS`
+strictly: `https://host` entries only, no paths or `*`) and runs read-only as uid 10001.
+
+**6. Switch over, then wait for the health check** (it runs every 30 s, so `healthy` takes
+about 30-40 s; the loop gives up after 90 s):
+
+```bash
+sudo docker compose up -d --force-recreate api
+for i in $(seq 30); do s=$(sudo docker inspect -f '{{.State.Health.Status}}' portfolio-server); echo "$s"; [ "$s" = healthy ] && break; sleep 3; done
+```
+
+**7. Check.**
+
+```bash
+sudo docker compose port api 8001                    # 0.0.0.0:80
+curl -s -H "Host: api.aashish-regmi.com.np" http://localhost/health        # {"status":"ok"}
+curl -s -H "Host: api.aashish-regmi.com.np" http://localhost/health/ready  # {"status":"ok"}
+curl -s -D - -o /dev/null -H "Host: api.aashish-regmi.com.np" http://localhost/health | grep -i -E "content-security|x-frame|strict-transport"
+sudo docker compose exec api id                      # uid=10001(app) ..., not root
+```
+
+Then open https://aashish-regmi.com.np and the admin once.
+
+**Rollback** (if step 6 or 7 fails). The old `docker-compose.yaml` publishes port 8001, so
+re-apply the port edit after checking out the old commit (`$PREV` from step 1; if that shell is
+gone, use `c9e5314`):
+
+```bash
+cd ~/portfolio-be
+git checkout "$PREV"
+sed -i 's/"8001:8001"/"80:8001"/' docker-compose.yaml
+sudo docker compose up -d --build --force-recreate
+```
+
+`API_HOST_PORT` in `.env` is harmless for the old code (unknown keys are ignored). Return to
+`main` later with `git checkout -- docker-compose.yaml && git switch main`.
+
+**Later deploys** are one command. It refuses to run if `API_HOST_PORT` isn't a port number in
+`.env` or a tracked file was edited on the VM, checks the published port before restarting,
+waits up to 90 s for `healthy`, smoke-tests `/health` and `/health/ready`, and prints the
+rollback commands (including an `alembic downgrade` when it migrated) if anything fails:
+
+```bash
+cd ~/portfolio-be && scripts/deploy.sh
+```
+
+Then, when you have time:
+
+- Uptime monitors and (optionally) Sentry: `docs/MONITORING.md`.
+- GitHub → each repo → *Settings* → *Rules* → *Rulesets* → new branch ruleset for `main`:
+  require a pull request and the CI status checks (backend: *Lint and lockfile*, *Tests*,
+  *Migrations on Postgres 18*, *Docker image*), block force pushes.
+- GitHub → *Settings* → *Code security*: enable *Dependabot alerts* and *Dependabot security
+  updates* (`.github/dependabot.yml` already schedules weekly version updates). Dependabot may
+  not bump the uv image in the Dockerfile's `COPY --from=ghcr.io/astral-sh/uv:...` line; when
+  you update uv, change it there and `UV_VERSION` in `.github/workflows/ci.yml` together.
+- Pitch Me: `docs/PITCH_GO_LIVE.md` (replaces step 10 above).
 
 ## Rollback
 

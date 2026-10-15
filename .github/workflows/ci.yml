@@ -1,0 +1,153 @@
+# Checks every pull request and every push to main. Nothing here deploys or uses secrets:
+# all settings are dummy values, the database is a throwaway service container.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel superseded PR runs only; every push to main gets a complete run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Keep in step with the uv image in the Dockerfile (COPY --from=ghcr.io/astral-sh/uv:...).
+  UV_VERSION: "0.12.21"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: Lint and lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv lock --check
+      - run: uv sync --locked
+      - run: uv run ruff check src alembic tests scripts/seed_content.py scripts/healthcheck.py scripts/pitch_golive_check.py
+      - run: uv run ruff format --check src alembic tests scripts/seed_content.py scripts/healthcheck.py scripts/pitch_golive_check.py
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked
+      # tests/__init__.py supplies a complete dummy environment; no database or network.
+      - run: uv run pytest -q
+
+  migrations:
+    name: Migrations on Postgres 18
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        # Same major version as production (Neon, PostgreSQL 18), pinned by multi-arch index
+        # digest. Dependabot doesn't update workflow service images: bump it by hand
+        # (docker buildx imagetools inspect postgres:18-alpine).
+        image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+        env:
+          POSTGRES_USER: portfolio
+          POSTGRES_PASSWORD: portfolio
+          POSTGRES_DB: portfolio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U portfolio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENV: test
+      DATABASE_URL: postgresql+asyncpg://portfolio:portfolio@localhost:5432/portfolio
+      TEST_DATABASE_URL: postgresql+asyncpg://portfolio:portfolio@localhost:5432/portfolio
+      SMTP_HOST: localhost
+      SMTP_USER: ci@example.com
+      SMTP_PASSWORD: dummy
+      SUPER_ADMIN_EMAIL: ci@example.com
+      PORTFOLIO_URL: http://localhost:5173
+      GITHUB_URL: https://github.com/example
+      LINKEDIN_URL: https://linkedin.com/in/example
+      JWT_SECRET_KEY: ci-dummy-secret-key-that-is-long-enough-123456
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Upgrade from an empty database
+        run: uv run alembic upgrade head
+      - name: Models match the migrations
+        run: uv run alembic check
+      - name: Every migration downgrades cleanly
+        run: uv run alembic downgrade base
+      - name: And upgrades again
+        run: uv run alembic upgrade head
+      - name: Database-backed tests
+        run: >-
+          uv run pytest -q tests/test_migrations.py tests/test_content_db.py
+          tests/test_contact_admin_db.py tests/test_pitch_history_db.py tests/test_pitch_usage_db.py
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker build -t portfolio-api:ci .
+      - name: Runs as a non-root user
+        run: test "$(docker run --rm --entrypoint id portfolio-api:ci -u)" != "0"
+      - name: Starts with production hardening and becomes healthy
+        run: |
+          docker run -d --name api -p 127.0.0.1:8001:8001 \
+            --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+            -e ENV=prod \
+            -e DATABASE_URL=postgresql+asyncpg://nobody:nobody@127.0.0.1:1/none \
+            -e SMTP_HOST=localhost -e SMTP_USER=ci@example.com -e SMTP_PASSWORD=dummy \
+            -e SUPER_ADMIN_EMAIL=ci@example.com -e PORTFOLIO_URL=https://example.com \
+            -e GITHUB_URL=https://github.com/example -e LINKEDIN_URL=https://linkedin.com/in/example \
+            -e JWT_SECRET_KEY=ci-dummy-secret-key-that-is-long-enough-123456 \
+            portfolio-api:ci
+          for _ in $(seq 30); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' api)"
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          docker logs api
+          test "$status" = healthy
+      - name: Liveness and security headers
+        run: |
+          curl -fsS -D headers.txt http://127.0.0.1:8001/health
+          grep -qi '^x-content-type-options: nosniff' headers.txt
+          grep -qi "^content-security-policy: default-src 'none'" headers.txt
+          grep -qi '^strict-transport-security:' headers.txt
+      - name: Clean up
+        if: always()
+        run: docker rm -f api || true

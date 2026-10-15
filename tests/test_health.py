@@ -3,8 +3,8 @@
 import asyncio
 import time
 
-from src.api import health_router
 from src.api.health_router import get_db_probe
+from src.core.config import settings
 from src.main import app
 
 
@@ -39,7 +39,7 @@ def test_readiness_503_when_database_fails(client):
 
 
 def test_readiness_503_when_database_is_slow(client, monkeypatch):
-    monkeypatch.setattr(health_router, "READY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(settings, "health_ready_timeout_seconds", 0.05)
 
     async def slow_probe():
         await asyncio.sleep(5)
@@ -55,7 +55,7 @@ def test_readiness_503_when_database_is_slow(client, monkeypatch):
 def test_readiness_does_not_wait_for_a_probe_that_is_slow_to_cancel(client, monkeypatch):
     # Regression: asyncpg needs a server reply to cancel a query, so against a hung
     # database a cancelled probe took ~147 s to unwind and asyncio.wait_for blocked on it.
-    monkeypatch.setattr(health_router, "READY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(settings, "health_ready_timeout_seconds", 0.05)
 
     async def stubborn_probe():
         try:
@@ -74,3 +74,25 @@ def test_readiness_does_not_wait_for_a_probe_that_is_slow_to_cancel(client, monk
 
 def test_root_route_is_removed(client):
     assert client.get("/").status_code == 404
+
+
+def test_head_probes_work_for_uptime_monitors(client):
+    # Uptime monitors often probe with HEAD; before Phase 7 that was a 405 ("down").
+    assert client.head("/health").status_code == 200
+    assert client.head("/health/ready").status_code == 200
+
+
+def test_head_readiness_reports_failure_too(client):
+    async def failing_probe():
+        raise ConnectionError("db down")
+
+    _use_probe(failing_probe)
+
+    assert client.head("/health/ready").status_code == 503
+
+
+def test_head_routes_stay_out_of_the_schema():
+    paths = app.openapi()["paths"]
+
+    assert set(paths["/health"]) == {"get"}
+    assert set(paths["/health/ready"]) == {"get"}
