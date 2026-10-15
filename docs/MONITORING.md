@@ -1,4 +1,4 @@
-# Monitoring (Phase 7.3)
+# Monitoring (Phase 7.3, revised in Phase 8)
 
 Two free layers: an **uptime monitor** that tells you when the site or API is down, and optional
 **error tracking** (Sentry) that tells you when code fails. Both are set up by you in the
@@ -10,27 +10,42 @@ Sign up at <https://uptimerobot.com> → *Add New Monitor*, three times:
 
 | Name | Type | URL | Settings |
 |---|---|---|---|
-| API ready | Keyword | `https://api.aashish-regmi.com.np/health/ready` | Keyword `"status":"ok"` (with the quotes, so a Cloudflare error page can't match), alert when the keyword **does not exist**; interval 5 min; timeout 30 s |
-| API alive | HTTP(s) | `https://api.aashish-regmi.com.np/health` | interval 5 min |
-| Website | HTTP(s) | `https://aashish-regmi.com.np/` | interval 5 min |
+| API alive | Keyword | `https://api.aashish-regmi.com.np/health` | Keyword `"status":"ok"` (with the quotes, so a Cloudflare error page can't match), alert when the keyword **does not exist**; interval **5 min**; timeout 30 s |
+| Website | HTTP(s) | `https://aashish-regmi.com.np/` | interval 5 min; timeout 30 s |
+| API database (optional) | Keyword | `https://api.aashish-regmi.com.np/health/ready` | Keyword `"status":"ok"`, alert when it **does not exist**; interval **60 min** (never shorter); timeout 30 s; *Notify after* 2 failures |
+
+**Why the database check is hourly, not every 5 minutes.** `/health` never touches the
+database, so it can be checked as often as you like. `/health/ready` runs `SELECT 1` on Neon.
+On Neon's free plan the database compute **suspends after about 5 minutes without queries** and
+wakes on the next one; that is what keeps it free. As far as we know (plans change: check
+<https://neon.com/pricing>), the free plan includes about **100 CU-hours of compute per project
+per month**, and once that is used up the compute stays suspended until the next month. The
+smallest compute is 0.25 CU, so running 24/7 costs about 0.25 × 730 ≈ **180+ CU-hours**: far more
+than the allowance. A check every 5 minutes would never let the compute sleep, so it would burn
+through the month and take the site's content and admin down. An hourly check wakes it for
+about 5 minutes each time (roughly 0.25 × 5/60 × 730 ≈ 15 CU-hours a month), which is cheap;
+no database check at all is cheaper still.
+
+The first `/health/ready` after a long idle wakes the database, which has taken more than 5 s
+in production; the API waits up to `HEALTH_READY_TIMEOUT_SECONDS` (default 10) before answering
+503, and *Notify after* 2 failures means one slow wake-up never alerts you.
 
 Keyword monitors send `GET`; plain HTTP(s) monitors may send `HEAD`. Both `/health` and
 `/health/ready` answer `HEAD` as well as `GET`, so either method works.
 
 *Alert contacts*: your email (and the UptimeRobot phone app for push notifications if you like).
-Set *Notify after* 2 failures for "API ready", so a single slow database wake-up doesn't page you.
 
 Better Stack (<https://betterstack.com/uptime>) works the same way if you prefer it.
 
 ### What each alert means and what to do first
 
-**API ready down, API alive up.** The API runs but can't reach the database.
+**API database down, API alive up.** The API runs but can't reach the database.
 
 1. <https://neonstatus.com> and the Neon console: is the project suspended or over a free-plan
    limit?
 2. On the VM: `cd ~/portfolio-be && sudo docker compose logs --tail=100 api | grep -i -E "error|readiness"`
-3. A wake-up from Neon's scale-to-zero can take a few seconds; the readiness timeout is
-   `HEALTH_READY_TIMEOUT_SECONDS` (default 5). Repeated failures are a real problem.
+3. A wake-up from Neon's scale-to-zero can take several seconds; the readiness timeout is
+   `HEALTH_READY_TIMEOUT_SECONDS` (default 10). Repeated failures are a real problem.
 
 **API alive down.** The API process or the VM is down (Cloudflare shows 521/522/523).
 

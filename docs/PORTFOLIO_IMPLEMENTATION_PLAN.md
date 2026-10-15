@@ -331,19 +331,20 @@ src/
 ### 6.1 Tests
 - [x] Backend (pytest + httpx `AsyncClient` + `respx`): contact validation and escaping, context with mocked providers, auth cycle, **regression test that `register` cannot escalate**, pitch graph with a fake LLM and mocked Tavily (CI never spends money)
 - [ ] Frontend (Vitest + Testing Library): `Contact` states, `useVisitorContext` fallbacks, `usePitchStream` closes on `done`/`error`
-- [ ] Playwright smoke test: page loads, hero resolves, form submits against a mock API
+- [x] Playwright smoke test: page loads, hero resolves, form submits against a mock API (frontend `e2e/`, Phase 7)
 
 ### 6.2 CI/CD
-- [x] Backend: `ruff` → `pytest` → build image → migrate (GitHub Actions); deploy is `scripts/deploy.sh` on the VM
-- [ ] Frontend: `npm ci` → `lint` → `typecheck` → `test` → `build` → `wrangler deploy`
+- [x] Backend: `ruff` → `pytest` → migrations → build image (GitHub Actions); on `main` a multi-arch image is published to GHCR (Phase 8) and `scripts/deploy.sh` on the VM pulls it, migrates, and rolls back automatically on failure
+- [x] Frontend: `npm ci` → `lint` → `typecheck` → `test` → `build` → Playwright smoke tests (GitHub Actions); deploy is Cloudflare Workers Builds on merge instead of `wrangler deploy`
 - [x] Dependabot or Renovate for both repos (backend: uv, docker, github-actions)
 
 ### 6.3 Production hardening
-- [ ] Security headers via `_headers` (CSP allowing only your API, Turnstile and fonts; `X-Content-Type-Options`; `Referrer-Policy`; `Permissions-Policy`) (F-SEC-4)
+- [x] Security headers via `_headers` (CSP allowing only your API, Turnstile and fonts; `X-Content-Type-Options`; `Referrer-Policy`; `Permissions-Policy`) (F-SEC-4): generated at build time by the frontend's `vite/headers.ts`
 - [x] CORS restricted to your exact origins (`ALLOWED_ORIGINS`); API security headers + CSP in `src/core/security_headers.py`
 - [x] Non-root Docker user, pinned `uv`, `HEALTHCHECK` (B-OPS-4/5), read-only filesystem, no capabilities
-- [x] Uptime monitor on `/health/ready`; error tracking (e.g. Sentry free tier): code + `docs/MONITORING.md`; the accounts are set up by hand
+- [x] Uptime monitor on `/health` every 5 min and `/health/ready` at most hourly (Neon free compute); error tracking (e.g. Sentry free tier): code + `docs/MONITORING.md`; the accounts are set up by hand
 - [ ] Redis-backed rate limiting if you ever run more than one host (B-OPS-6)
+- [x] TLS between Cloudflare and the origin (Cloudflare Origin Certificate, Gunicorn TLS) so SSL can be Full (strict): code + `docs/ORIGIN_TLS.md` (Phase 8); the cutover is done by hand
 
 ### 6.4 Launch checklist
 - [ ] All Phase 0 items verified in production

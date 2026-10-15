@@ -1,12 +1,17 @@
 services:
   api:
+    # The image to run. On the EC2 VM, scripts/deploy.sh sets API_IMAGE in .env to the image CI
+    # published (ghcr.io/regmiaashish/portfolio-be:sha-<commit>), so the VM never builds.
+    # Locally it stays unset: `docker compose build` builds and tags portfolio-be-api:latest.
+    image: ${API_IMAGE:-portfolio-be-api:latest}
     build:
       context: .
       dockerfile: Dockerfile
     container_name: portfolio-server
     restart: always
     ports:
-      # Host port from API_HOST_PORT in .env (the EC2 VM behind Cloudflare uses 80).
+      # Host port from API_HOST_PORT in .env: 80 on the EC2 VM behind Cloudflare, 443 once the
+      # container serves TLS (docs/ORIGIN_TLS.md).
       - "${API_HOST_PORT:-8001}:8001"
     env_file:
       - .env
