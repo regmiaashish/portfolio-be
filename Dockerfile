@@ -2,7 +2,7 @@
 # runs code nobody reviewed. Dependabot (.github/dependabot.yml) proposes updates.
 
 # Stage 1: build the virtual environment
-FROM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 AS builder
+FROM python:3.12-alpine@sha256:b658b05ce9c4eb97ec6fc19424818a1f31993659c2b505a532f470e83807815d AS builder
 
 # uv from its official image instead of a downloaded install script. Keep the version in step
 # with UV_VERSION in .github/workflows/ci.yml; Dependabot may not bump this COPY --from line.
@@ -29,7 +29,7 @@ RUN /app/.venv/bin/python -m compileall -q src alembic scripts \
     && chmod +x scripts/run.sh
 
 # Stage 2: runtime
-FROM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4
+FROM python:3.12-alpine@sha256:b658b05ce9c4eb97ec6fc19424818a1f31993659c2b505a532f470e83807815d
 
 WORKDIR /app
 
